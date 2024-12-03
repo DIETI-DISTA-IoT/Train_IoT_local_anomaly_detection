@@ -8,4 +8,5 @@ six>=1.16.0
 tenacity>=9.0.0
 tzdata>=2024.2
 wandb>=0.18.7
-torch --index-url https://download.pytorch.org/whl/cpu
+# you'll probably need to update this alongside python versions and gpu availability.
+torch @ https://download.pytorch.org/whl/cpu/torch-2.5.1+cpu-cp313-cp313-linux_x86_64.whl 

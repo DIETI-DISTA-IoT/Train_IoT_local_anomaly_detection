@@ -1,5 +1,5 @@
 # Use Debian slim as the base image for a lightweight but more flexible base
-FROM python:3.10-slim-bullseye
+FROM python:3.13-slim-bullseye
 
 # Install system dependencies required for building Python packages and PyTorch dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,9 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip
 # Install PyTorch and other dependencies
 # Note: You may need to adjust the PyTorch installation command based on your specific requirements
 # This is a generic CPU-only installation - modify as needed
-RUN pip install --no-cache-dir \
-    torch torchvision torchaudio \
-    -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Command to start the application
 CMD ["python", "consumer_synthetic_data.py"]

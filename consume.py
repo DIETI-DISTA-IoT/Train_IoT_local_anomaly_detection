@@ -1,9 +1,7 @@
 import argparse
 import logging
-import os
 import threading
 import json
-import sys
 import time
 from confluent_kafka import Consumer, KafkaError, KafkaException, SerializingProducer
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -12,19 +10,6 @@ from confluent_kafka.serialization import StringSerializer
 from preprocessing import Buffer
 from brain import Brain
 from reporting import MetricsReporter
-
-
-# Configure logging for detailed output
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Read Kafka configuration from environment variables
-KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')  # Kafka broker URL
-VEHICLE_NAME=os.getenv('VEHICLE_NAME')
-CONTAINER_NAME=os.getenv('CONTAINER_NAME')
-
-
-logging.info(f"Starting consumer system for vehicle: {VEHICLE_NAME}")
-
 
 
 received_all_real_msg = 0
@@ -91,10 +76,10 @@ def deserialize_message(msg):
     try:
         # Decode the message and deserialize it into a Python dictionary
         message_value = json.loads(msg.value().decode('utf-8'))
-        logging.info(f"{CONTAINER_NAME}: received message from topic [{msg.topic()}]")
+        logging.info(f"received message from topic [{msg.topic()}]")
         return message_value
     except json.JSONDecodeError as e:
-        logging.error(f"{CONTAINER_NAME}: Error deserializing message: {e}")
+        logging.error(f"Error deserializing message: {e}")
         return None
 
 
@@ -104,13 +89,13 @@ def process_message(topic, msg, producer):
     """
     global received_all_real_msg, received_anomalies_msg, received_normal_msg
 
-    logging.info(f"Processing message from topic [{topic}]")
+    logger.info(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
-        logging.debug(f"{CONTAINER_NAME}: ANOMALIES - Processing message")
+        logger.debug(f"ANOMALIES - Processing message")
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
     elif topic.endswith("_normal_data"):
-        logging.debug(f"{CONTAINER_NAME}: NORMAL DATA - Processing message")
+        logger.debug(f"NORMAL DATA - Processing message")
         diagnostics_buffer.add(msg)
         received_normal_msg += 1
 
@@ -131,7 +116,7 @@ def consume_vehicle_data():
     producer = create_producer_statistic()
 
     consumer.subscribe([topic_anomalies, topic_normal_data])
-    logging.info(f"{CONTAINER_NAME} will start consuming {topic_anomalies}, {topic_normal_data}")
+    logger.info(f"will start consuming {topic_anomalies}, {topic_normal_data}")
 
     try:
         while True:
@@ -140,9 +125,9 @@ def consume_vehicle_data():
                 continue
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
-                    logging.info(f"{CONTAINER_NAME}: End of partition reached for {msg.topic()}")
+                    logger.info(f"End of partition reached for {msg.topic()}")
                 else:
-                    logging.error(f"{CONTAINER_NAME}: consumer error: {msg.error()}")
+                    logger.error(f"consumer error: {msg.error()}")
                 continue
 
             deserialized_data = deserialize_message(msg)
@@ -150,12 +135,12 @@ def consume_vehicle_data():
                 process_message(msg.topic(), deserialized_data, producer)
 
     except KeyboardInterrupt:
-        logging.info(f"{CONTAINER_NAME}: consumer interrupted by user.")
+        logger.info(f"consumer interrupted by user.")
     except Exception as e:
-        logging.error(f"{CONTAINER_NAME}: error in consumer for {VEHICLE_NAME}: {e}")
+        logger.error(f" error in consumer for {VEHICLE_NAME}: {e}")
     finally:
         consumer.close()
-        logging.info(f"{CONTAINER_NAME}: consumer for {VEHICLE_NAME} closed.")
+        logger.info(f"consumer for {VEHICLE_NAME} closed.")
 
 
 def train_model(**kwargs):
@@ -189,13 +174,13 @@ def train_model(**kwargs):
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
 
-def main(argv):
+def main():
     """
         Start the consumer for the specific vehicle.
     """
-    global VEHICLE_NAME, CONTAINER_NAME, KAFKA_BROKER
+    global VEHICLE_NAME, KAFKA_BROKER
     global batch_size
-    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter
+    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
@@ -204,12 +189,16 @@ def main(argv):
     parser.add_argument('--buffer_size', type=int, default=10, help='Size of the buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
-    args = parser.parse_args(argv)
+    
+    args = parser.parse_args()
+
+    logger = logging.getLogger(args.container_name)
+    logger.setLevel(args.logging_level)
 
     VEHICLE_NAME = args.vehicle_name
-    CONTAINER_NAME = args.container_name
     KAFKA_BROKER = args.kafka_broker
-    
+
+    logging.debug(f"Starting consumer for vehicle {VEHICLE_NAME}")    
 
     brain = Brain(**vars(args))
     metrics_reporter = MetricsReporter(**vars(args))
@@ -231,4 +220,4 @@ def main(argv):
 
 
 if __name__=="__main__":
-    main(sys.argv[1:])
+    main()

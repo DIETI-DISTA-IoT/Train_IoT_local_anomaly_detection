@@ -16,8 +16,10 @@ class MetricsReporter:
          }
         self.producer = SerializingProducer(conf_prod_stat)
         logging_level = kwargs.get('logging_level', 'INFO')
-        logging.getLogger().setLevel(logging_level)
     
+        self.logger = logging.getLogger("REPORTER_" + kwargs['container_name'])
+        self.logger.setLevel(kwargs.get('logging_level', 'INFO'))
+
     def report(self, metrics):
 
         stats = {
@@ -29,6 +31,6 @@ class MetricsReporter:
         try:
             self.producer.produce(topic=topic_statistics, value=stats)
             self.producer.flush()
-            logging.debug(f"{self.vehicle_name}_BRAIN: published to topic: {topic_statistics}")
+            self.logger.debug(f"{self.vehicle_name}_BRAIN: published to topic: {topic_statistics}")
         except Exception as e:
-            logging.error(f"{self.vehicle_name}_BRAIN: Failed to produce statistics: {e}")
+            self.logger.error(f"{self.vehicle_name}_BRAIN: Failed to produce statistics: {e}")

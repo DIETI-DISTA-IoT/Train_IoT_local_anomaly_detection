@@ -1,11 +1,17 @@
-# Use Debian slim as the base image for a lightweight but more flexible base
+# Use Debian slim as the base image
 FROM python:3.13-slim-bullseye
 
-# Install system dependencies required for building Python packages and PyTorch dependencies
+# Install system dependencies required for building Python packages and Kafka dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
+    wget \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libsasl2-dev \
     librdkafka-dev \
+    librdkafka1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,13 +24,21 @@ RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detecti
 # Set additional environment variables for Kafka connection
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME=""
+ENV CONTAINER_NAME="generic_consumer"
 
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 
-# Install PyTorch and other dependencies
-# Note: You may need to adjust the PyTorch installation command based on your specific requirements
-# This is a generic CPU-only installation - modify as needed
+
+RUN pip install --no-cache-dir \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+# We are actually working with confluent_Kafka version 2.6.1. 
+RUN pip install --no-cache-dir \
+confluent_Kafka
+
+
+# Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Command to start the application

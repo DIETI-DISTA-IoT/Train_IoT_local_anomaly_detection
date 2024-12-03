@@ -4,7 +4,6 @@ import os
 import threading
 import json
 import time
-from lib2to3.pgen2.parse import Parser
 
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, SerializingProducer
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -17,6 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Read Kafka configuration from environment variables
 KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')  # Kafka broker URL
 VEHICLE_NAME=os.getenv('VEHICLE_NAME')
+CONTAINER_NAME=os.getenv('CONTAINER_NAME')
 
 # Validate that KAFKA_BROKER and TOPIC_NAME are set
 if not KAFKA_BROKER:
@@ -35,6 +35,7 @@ received_all_real_msg = 0
 received_anomalies_msg = 0
 received_normal_msg = 0
 
+
 def create_consumer():
     # Kafka consumer configuration
     conf_cons = {
@@ -44,6 +45,7 @@ def create_consumer():
     }
     return Consumer(conf_cons)
 
+
 def create_producer_statistic():
     conf_prod_stat={
         'bootstrap.servers': KAFKA_BROKER,  # Kafka broker URL
@@ -51,6 +53,7 @@ def create_producer_statistic():
         'value.serializer': lambda v, ctx: json.dumps(v)
     }
     return SerializingProducer(conf_prod_stat)
+
 
 def check_and_create_topics(topic_list):
     """
@@ -78,6 +81,7 @@ def check_and_create_topics(topic_list):
             except KafkaException as e:
                 logging.error(f"Failed to create topic '{topic}': {e}")
 
+
 def produce_statistics(producer):
     """
     Publish the current statistics to the VEHICLE_NAME_statistics topic.
@@ -96,9 +100,10 @@ def produce_statistics(producer):
     try:
         producer.produce(topic=topic_statistics, value=stats)
         producer.flush()
-        logging.info(f"Statistics published to topic: {topic_statistics}")
+        logging.info(f"{CONTAINER_NAME}: published to topic: {topic_statistics}")
     except Exception as e:
-        logging.error(f"Failed to produce statistics: {e}")
+        logging.error(f"{CONTAINER_NAME}: Failed to produce statistics: {e}")
+
 
 def deserialize_message(msg):
     """
@@ -113,11 +118,12 @@ def deserialize_message(msg):
     try:
         # Decode the message and deserialize it into a Python dictionary
         message_value = json.loads(msg.value().decode('utf-8'))
-        logging.info(f"Received message from topic [{msg.topic()}]")
+        logging.info(f"{CONTAINER_NAME}: received message from topic [{msg.topic()}]")
         return message_value
     except json.JSONDecodeError as e:
-        logging.error(f"Error deserializing message: {e}")
+        logging.error(f"{CONTAINER_NAME}: Error deserializing message: {e}")
         return None
+
 
 def process_message(topic, msg, producer):
     """
@@ -127,17 +133,17 @@ def process_message(topic, msg, producer):
 
     logging.info(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
-        logging.info(f"ANOMALIES - Processing message")
+        logging.debug(f"{CONTAINER_NAME}: ANOMALIES - Processing message")
         anomalies_msg_list.append(msg)
         received_anomalies_msg += 1
     elif topic.endswith("_normal_data"):
-        logging.info(f"NORMAL DATA - Processing message")
+        logging.debug(f"{CONTAINER_NAME}: NORMAL DATA - Processing message")
         normal_msg_list.append(msg)
         received_normal_msg += 1
 
     real_msg_list.append(msg)
     received_all_real_msg += 1
-    print(f"DATA ({topic}) - {msg}")
+    logging.debug(f"{CONTAINER_NAME}: DATA ({topic}) - {msg}")
 
     produce_statistics(producer)
 
@@ -156,8 +162,7 @@ def consume_vehicle_data():
     producer = create_producer_statistic()
 
     consumer.subscribe([topic_anomalies, topic_normal_data])
-    logging.info(f"Started consumer for [{VEHICLE_NAME}] ...")
-    logging.info(f"Subscribed to topics: {topic_anomalies}, {topic_normal_data}")
+    logging.info(f"{CONTAINER_NAME} will start consuming {topic_anomalies}, {topic_normal_data}")
 
     try:
         while True:
@@ -166,32 +171,34 @@ def consume_vehicle_data():
                 continue
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
-                    logging.info(f"End of partition reached for {msg.topic()}")
+                    logging.info(f"{CONTAINER_NAME}: End of partition reached for {msg.topic()}")
                 else:
-                    logging.error(f"Consumer error: {msg.error()}")
+                    logging.error(f"{CONTAINER_NAME}: consumer error: {msg.error()}")
                 continue
 
             deserialized_data = deserialize_message(msg)
             if deserialized_data:
                 process_message(msg.topic(), deserialized_data, producer)
+
     except KeyboardInterrupt:
-        logging.info("Consumer interrupted by user.")
+        logging.info(f"{CONTAINER_NAME}: consumer interrupted by user.")
     except Exception as e:
-        logging.error(f"Error in consumer for {VEHICLE_NAME}: {e}")
+        logging.error(f"{CONTAINER_NAME}: error in consumer for {VEHICLE_NAME}: {e}")
     finally:
         consumer.close()
-        logging.info(f"Consumer for {VEHICLE_NAME} closed.")
+        logging.info(f"{CONTAINER_NAME}: consumer for {VEHICLE_NAME} closed.")
+
 
 def main():
     """
         Start the consumer for the specific vehicle.
     """
-    logging.info(f"Setting up consumer for vehicle: {VEHICLE_NAME}")
     thread1=threading.Thread(target=consume_vehicle_data)
     thread1.daemon=True
-    logging.info(f"Starting consumer thread for vehicle: {VEHICLE_NAME}")
+    
     thread1.start()
     thread1.join()
+
 
 if __name__=="__main__":
     main()

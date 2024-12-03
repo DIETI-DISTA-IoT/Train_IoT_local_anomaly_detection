@@ -42,4 +42,4 @@ confluent_Kafka
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Command to start the application
-CMD ["python", "consumer_synthetic_data.py"]
+CMD ["python", "consume.py"]

@@ -11,7 +11,8 @@
             "program": "consume.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": []
+            "args": ["--vehicle_name=tom",
+                        "--batch_size=2"]
         }
     ]
 }

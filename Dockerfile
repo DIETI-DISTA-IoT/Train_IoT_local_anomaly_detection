@@ -37,6 +37,8 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
 confluent_Kafka
 
+# Python 3.13 requires this to be compatible with pytorch
+RUM pip install --upgrade typing_extensions
 
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt

@@ -3,12 +3,13 @@ import logging
 import os
 import threading
 import json
+import sys
 import time
-
+from preprocessing import Buffer
+from brain import Brain
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, SerializingProducer
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.serialization import StringSerializer
-
 
 # Configure logging for detailed output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,18 +19,10 @@ KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')  # Kafka broker URL
 VEHICLE_NAME=os.getenv('VEHICLE_NAME')
 CONTAINER_NAME=os.getenv('CONTAINER_NAME')
 
-# Validate that KAFKA_BROKER and TOPIC_NAME are set
-if not KAFKA_BROKER:
-    raise ValueError("Environment variable KAFKA_BROKER is missing.")
-if not VEHICLE_NAME:
-    raise ValueError("Environment variable VEHICLE_NAME is missing.")
 
 logging.info(f"Starting consumer system for vehicle: {VEHICLE_NAME}")
 
-# List to store received messages and a constant for the maximum number of stored messages
-real_msg_list = []  # Stores real sensor messages
-anomalies_msg_list = []
-normal_msg_list = []
+
 
 received_all_real_msg = 0
 received_anomalies_msg = 0
@@ -134,14 +127,13 @@ def process_message(topic, msg, producer):
     logging.info(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
         logging.debug(f"{CONTAINER_NAME}: ANOMALIES - Processing message")
-        anomalies_msg_list.append(msg)
+        anomalies_buffer.add(msg)
         received_anomalies_msg += 1
     elif topic.endswith("_normal_data"):
         logging.debug(f"{CONTAINER_NAME}: NORMAL DATA - Processing message")
-        normal_msg_list.append(msg)
+        diagnostics_buffer.add(msg)
         received_normal_msg += 1
 
-    real_msg_list.append(msg)
     received_all_real_msg += 1
     logging.debug(f"{CONTAINER_NAME}: DATA ({topic}) - {msg}")
 
@@ -189,7 +181,29 @@ def consume_vehicle_data():
         logging.info(f"{CONTAINER_NAME}: consumer for {VEHICLE_NAME} closed.")
 
 
-def main():
+
+
+
+
+def train_model(**kwargs):
+    global brain
+
+    batch_size = kwargs.get('batch_size', 32)
+    while True:
+
+        if diagnostics_buffer.size >= batch_size and anomalies_buffer.size >= batch_size:
+            diagnostics_feats, diagnostics_labels = diagnostics_buffer.sample(batch_size)
+            anomalies_feats, anomalies_labels = anomalies_buffer.sample(batch_size)
+
+            if len(diagnostics_feats) > 0:
+                diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
+
+            if len(anomalies_feats) > 0:
+                anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
+
+        time.sleep(kwargs.get('training_freq_seconds', 1))
+
+def main(kwargs):
     """
         Start the consumer for the specific vehicle.
     """
@@ -199,6 +213,43 @@ def main():
     thread1.start()
     thread1.join()
 
+def main(argv):
+    """
+        Start the consumer for the specific vehicle.
+    """
+    global VEHICLE_NAME, CONTAINER_NAME, KAFKA_BROKER
+    global batch_size
+    global anomalies_buffer, diagnostics_buffer, brain
+
+    parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
+    parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
+    parser.add_argument('--container_name', type=str, default='generic_consumer', help='Name of the container')
+    parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
+    parser.add_argument('--buffer_size', type=int, default=10, help='Size of the buffer')
+    parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
+    args = parser.parse_args(argv)
+
+    VEHICLE_NAME = args.vehicle_name
+    CONTAINER_NAME = args.container_name
+    KAFKA_BROKER = args.kafka_broker
+
+    brain = Brain(**vars(args))
+
+    anomalies_buffer = Buffer(args.buffer_size, label=1)
+    diagnostics_buffer = Buffer(args.buffer_size, label=0)
+
+    thread1=threading.Thread(target=consume_vehicle_data)
+    thread1.daemon=True
+
+    training_thread=threading.Thread(target=train_model, kwargs=vars(args))
+    training_thread.daemon=True
+    
+    thread1.start()
+    training_thread.start()
+
+    thread1.join()
+    training_thread.join()
+
 
 if __name__=="__main__":
-    main()
+    main(sys.argv[1:])

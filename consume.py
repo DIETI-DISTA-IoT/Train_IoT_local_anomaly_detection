@@ -115,7 +115,6 @@ def process_message(topic, msg, producer):
         received_normal_msg += 1
 
     received_all_real_msg += 1
-    logging.debug(f"{CONTAINER_NAME}: DATA ({topic}) - {msg}")
 
 
 def consume_vehicle_data():
@@ -210,6 +209,7 @@ def main(argv):
     VEHICLE_NAME = args.vehicle_name
     CONTAINER_NAME = args.container_name
     KAFKA_BROKER = args.kafka_broker
+    
 
     brain = Brain(**vars(args))
     metrics_reporter = MetricsReporter(**vars(args))

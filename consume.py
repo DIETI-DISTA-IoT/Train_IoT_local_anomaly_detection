@@ -5,11 +5,14 @@ import threading
 import json
 import sys
 import time
-from preprocessing import Buffer
-from brain import Brain
-from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, SerializingProducer
+from confluent_kafka import Consumer, KafkaError, KafkaException, SerializingProducer
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.serialization import StringSerializer
+
+from preprocessing import Buffer
+from brain import Brain
+from reporting import MetricsReporter
+
 
 # Configure logging for detailed output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -75,29 +78,6 @@ def check_and_create_topics(topic_list):
                 logging.error(f"Failed to create topic '{topic}': {e}")
 
 
-def produce_statistics(producer):
-    """
-    Publish the current statistics to the VEHICLE_NAME_statistics topic.
-
-    Args:
-        producer (Producer): The Kafka producer instance.
-    """
-    global received_all_real_msg, received_anomalies_msg, received_normal_msg
-    stats = {
-        'vehicle_name' : VEHICLE_NAME,
-        'total_messages': received_all_real_msg,
-        'anomalies_messages': received_anomalies_msg,
-        'normal_messages': received_normal_msg
-    }
-    topic_statistics=f"{VEHICLE_NAME}_statistics"
-    try:
-        producer.produce(topic=topic_statistics, value=stats)
-        producer.flush()
-        logging.info(f"{CONTAINER_NAME}: published to topic: {topic_statistics}")
-    except Exception as e:
-        logging.error(f"{CONTAINER_NAME}: Failed to produce statistics: {e}")
-
-
 def deserialize_message(msg):
     """
     Deserialize the JSON-serialized data received from the Kafka Consumer.
@@ -136,8 +116,6 @@ def process_message(topic, msg, producer):
 
     received_all_real_msg += 1
     logging.debug(f"{CONTAINER_NAME}: DATA ({topic}) - {msg}")
-
-    produce_statistics(producer)
 
 
 def consume_vehicle_data():
@@ -181,15 +159,13 @@ def consume_vehicle_data():
         logging.info(f"{CONTAINER_NAME}: consumer for {VEHICLE_NAME} closed.")
 
 
-
-
-
-
 def train_model(**kwargs):
     global brain
 
     batch_size = kwargs.get('batch_size', 32)
     while True:
+
+        anomalies_loss = diagnostics_loss = 0
 
         if diagnostics_buffer.size >= batch_size and anomalies_buffer.size >= batch_size:
             diagnostics_feats, diagnostics_labels = diagnostics_buffer.sample(batch_size)
@@ -197,21 +173,22 @@ def train_model(**kwargs):
 
             if len(diagnostics_feats) > 0:
                 diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
+                diagnostics_loss /= len(diagnostics_feats)
 
             if len(anomalies_feats) > 0:
                 anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
+                anomalies_loss /= len(anomalies_feats)
+
+        total_loss = anomalies_loss + diagnostics_loss
+
+        if total_loss > 0:
+            metrics_reporter.report({
+                'anomalies_loss': anomalies_loss, 
+                'diagnostics_loss': diagnostics_loss, 
+                'total_loss': total_loss})
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
-def main(kwargs):
-    """
-        Start the consumer for the specific vehicle.
-    """
-    thread1=threading.Thread(target=consume_vehicle_data)
-    thread1.daemon=True
-    
-    thread1.start()
-    thread1.join()
 
 def main(argv):
     """
@@ -219,7 +196,7 @@ def main(argv):
     """
     global VEHICLE_NAME, CONTAINER_NAME, KAFKA_BROKER
     global batch_size
-    global anomalies_buffer, diagnostics_buffer, brain
+    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
@@ -227,6 +204,7 @@ def main(argv):
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
     parser.add_argument('--buffer_size', type=int, default=10, help='Size of the buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
+    parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     args = parser.parse_args(argv)
 
     VEHICLE_NAME = args.vehicle_name
@@ -234,6 +212,7 @@ def main(argv):
     KAFKA_BROKER = args.kafka_broker
 
     brain = Brain(**vars(args))
+    metrics_reporter = MetricsReporter(**vars(args))
 
     anomalies_buffer = Buffer(args.buffer_size, label=1)
     diagnostics_buffer = Buffer(args.buffer_size, label=0)

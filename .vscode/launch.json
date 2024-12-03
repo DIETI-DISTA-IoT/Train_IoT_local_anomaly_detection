@@ -12,7 +12,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": ["--vehicle_name=tom",
-                        "--batch_size=2"]
+                        "--batch_size=2",
+                        "--logging_level=DEBUG"]
         }
     ]
 }

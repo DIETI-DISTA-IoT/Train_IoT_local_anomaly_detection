@@ -44,7 +44,7 @@ class Buffer:
         for record in record_list:
             tensors.append(dict_to_tensor(record))
             x_batch = torch.stack(tensors)
-            y_batch = torch.tensor([[self.label] * len(tensors)])
+            y_batch = torch.tensor([[self.label]] * len(tensors)).to(torch.float32)
 
         if len(tensors) == 0:
             x_batch, y_batch = [], []

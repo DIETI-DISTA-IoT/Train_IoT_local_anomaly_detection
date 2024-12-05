@@ -148,24 +148,25 @@ def train_model(**kwargs):
 
     batch_size = kwargs.get('batch_size', 32)
     while True:
-
+        train_step_done = False
         anomalies_loss = diagnostics_loss = 0
 
-        if diagnostics_buffer.size >= batch_size and anomalies_buffer.size >= batch_size:
-            diagnostics_feats, diagnostics_labels = diagnostics_buffer.sample(batch_size)
-            anomalies_feats, anomalies_labels = anomalies_buffer.sample(batch_size)
+        diagnostics_feats, diagnostics_labels = diagnostics_buffer.sample(batch_size)
+        anomalies_feats, anomalies_labels = anomalies_buffer.sample(batch_size)
 
-            if len(diagnostics_feats) > 0:
-                diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
-                diagnostics_loss /= len(diagnostics_feats)
+        if len(diagnostics_feats) > 0:
+            diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
+            diagnostics_loss /= len(diagnostics_feats)
+            train_step_done = True
 
-            if len(anomalies_feats) > 0:
-                anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
-                anomalies_loss /= len(anomalies_feats)
+        if len(anomalies_feats) > 0:
+            anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
+            anomalies_loss /= len(anomalies_feats)
+            train_step_done = True
 
         total_loss = anomalies_loss + diagnostics_loss
 
-        if total_loss > 0:
+        if train_step_done:
             metrics_reporter.report({
                 'anomalies_loss': anomalies_loss, 
                 'diagnostics_loss': diagnostics_loss, 
@@ -186,7 +187,7 @@ def main():
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
     parser.add_argument('--container_name', type=str, default='generic_consumer', help='Name of the container')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
-    parser.add_argument('--buffer_size', type=int, default=10, help='Size of the buffer')
+    parser.add_argument('--buffer_size', type=int, default=100, help='Size of the message buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     

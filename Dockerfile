@@ -29,7 +29,6 @@ ENV CONTAINER_NAME="generic_consumer"
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 
-
 RUN pip install --no-cache-dir \
     torch --index-url https://download.pytorch.org/whl/cpu
 

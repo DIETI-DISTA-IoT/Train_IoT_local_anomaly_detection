@@ -11,9 +11,10 @@
             "program": "consume.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--vehicle_name=vehicle1",
+            "args": ["--vehicle_name=alice",
                         "--batch_size=2",
-                        "--logging_level=DEBUG"]
+                        "--logging_level=DEBUG",
+                        "--weights_push_freq_seconds=5"]
         }
     ]
 }

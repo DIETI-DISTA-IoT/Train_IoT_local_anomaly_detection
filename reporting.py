@@ -24,9 +24,9 @@ class WeightsReporter:
         try:
             self.producer.produce(topic=weights_topic, value=weights)
             self.producer.flush()
-            self.logger.debug(f"{self.vehicle_name}_BRAIN: published to topic: {weights_topic}")
+            self.logger.debug(f"Published to topic: {weights_topic}")
         except Exception as e:
-            self.logger.error(f"{self.vehicle_name}_BRAIN: Failed to produce weights: {e}")
+            self.logger.error(f"Failed to produce weights: {e}")
 
 
 class MetricsReporter:
@@ -54,6 +54,6 @@ class MetricsReporter:
         try:
             self.producer.produce(topic=topic_statistics, value=stats)
             self.producer.flush()
-            self.logger.debug(f"{self.vehicle_name}_BRAIN: published to topic: {topic_statistics}")
+            self.logger.debug(f"Published to topic: {topic_statistics}")
         except Exception as e:
-            self.logger.error(f"{self.vehicle_name}_BRAIN: Failed to produce statistics: {e}")
+            self.logger.error(f"Failed to produce statistics: {e}")

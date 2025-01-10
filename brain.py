@@ -13,6 +13,7 @@ class Brain:
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
 
+
     def train_step(self, x, y):
         self.model.train()
         self.optimizer.zero_grad()

@@ -16,7 +16,7 @@ class WeightsReporter:
         self.producer = SerializingProducer(conf_prod_weights)
 
         self.logger = logging.getLogger("WEIGHTSUPLOADER" + kwargs['container_name'])
-        self.logger.setLevel(kwargs.get('logging_level', 'INFO'))
+        self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
     
 
     def push_weights(self, weights):
@@ -41,7 +41,7 @@ class MetricsReporter:
         
         self.producer = SerializingProducer(conf_prod_stat)    
         self.logger = logging.getLogger("REPORTER_" + kwargs['container_name'])
-        self.logger.setLevel(kwargs.get('logging_level', 'INFO'))
+        self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
     def report(self, metrics):
 

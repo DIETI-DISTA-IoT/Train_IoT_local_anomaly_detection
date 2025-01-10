@@ -203,7 +203,7 @@ def main():
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)
-    logger.setLevel(args.logging_level)
+    logger.setLevel(str(args.logging_level).upper())
 
     VEHICLE_NAME = args.vehicle_name
     KAFKA_BROKER = args.kafka_broker

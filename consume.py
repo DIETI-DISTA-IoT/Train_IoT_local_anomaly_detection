@@ -9,7 +9,7 @@ from confluent_kafka.serialization import StringSerializer
 
 from preprocessing import Buffer
 from brain import Brain
-from reporting import MetricsReporter, WeightsReporter
+from communication import MetricsReporter, WeightsReporter, WeightsPuller
 
 
 received_all_real_msg = 0
@@ -150,6 +150,17 @@ def push_weights(**kwargs):
         weights_reporter.push_weights(brain.model.state_dict())
 
 
+def pull_weights(**kwargs):
+    global brain
+
+    while True:
+        time.sleep(kwargs.get('weights_pull_freq_seconds', 300))        
+        new_weights = global_weights_puller.pull_weights()
+        if new_weights:
+            brain.model.load_state_dict(new_weights)
+            logger.info("Local weights updated using global model.")
+
+
 def train_model(**kwargs):
     global brain
 
@@ -189,7 +200,7 @@ def main():
     """
     global VEHICLE_NAME, KAFKA_BROKER
     global batch_size
-    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter
+    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
@@ -198,8 +209,8 @@ def main():
     parser.add_argument('--buffer_size', type=int, default=100, help='Size of the message buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
-    parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval beteween weights push')
-
+    parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval between weights push')
+    parser.add_argument('--weights_pull_freq_seconds', type=int, default=300, help='Seconds interval between weights pulling from coordinator')
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)
@@ -213,26 +224,32 @@ def main():
     brain = Brain(**vars(args))
     metrics_reporter = MetricsReporter(**vars(args))
     weights_reporter = WeightsReporter(**vars(args))
+    global_weights_puller = WeightsPuller(**vars(args))
 
     anomalies_buffer = Buffer(args.buffer_size, label=1)
     diagnostics_buffer = Buffer(args.buffer_size, label=0)
 
-    consuming_thread=threading.Thread(target=consume_vehicle_data)
-    consuming_thread.daemon=True
+    stas_consuming_thread=threading.Thread(target=consume_vehicle_data)
+    stas_consuming_thread.daemon=True
 
     training_thread=threading.Thread(target=train_model, kwargs=vars(args))
     training_thread.daemon=True
 
     pushing_weights_thread=threading.Thread(target=push_weights, kwargs=vars(args))
     pushing_weights_thread.daemon=True
+
+    pulling_weights_thread=threading.Thread(target=pull_weights, kwargs=vars(args))
+    pulling_weights_thread.daemon=True
     
-    consuming_thread.start()
+    stas_consuming_thread.start()
     training_thread.start()
     pushing_weights_thread.start()
+    pulling_weights_thread.start()
 
-    consuming_thread.join()
+    stas_consuming_thread.join()
     training_thread.join()
     pushing_weights_thread.join()
+    pulling_weights_thread.join()
 
 
 if __name__=="__main__":

@@ -89,13 +89,11 @@ def process_message(topic, msg, producer):
     """
     global received_all_real_msg, received_anomalies_msg, received_normal_msg
 
-    logger.info(f"Processing message from topic [{topic}]")
+    logger.debug(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
-        logger.debug(f"ANOMALIES - Processing message")
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
     elif topic.endswith("_normal_data"):
-        logger.debug(f"NORMAL DATA - Processing message")
         diagnostics_buffer.add(msg)
         received_normal_msg += 1
 

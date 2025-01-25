@@ -10,7 +10,8 @@ from confluent_kafka.serialization import StringSerializer
 from preprocessing import Buffer
 from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
-
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import torch
 
 received_all_real_msg = 0
 received_anomalies_msg = 0
@@ -163,8 +164,11 @@ def train_model(**kwargs):
     global brain
 
     batch_size = kwargs.get('batch_size', 32)
+    
 
     while True:
+        batch_labels = None
+        batch_preds = None
         train_step_done = False
         anomalies_loss = diagnostics_loss = 0
 
@@ -172,22 +176,35 @@ def train_model(**kwargs):
         anomalies_feats, anomalies_labels = anomalies_buffer.sample(batch_size)
 
         if len(diagnostics_feats) > 0:
-            diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
-            diagnostics_loss /= len(diagnostics_feats)
+            diagnostics_preds, diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
             train_step_done = True
+            batch_labels = diagnostics_labels
+            batch_preds = diagnostics_preds
 
         if len(anomalies_feats) > 0:
-            anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
-            anomalies_loss /= len(anomalies_feats)
+            anomalies_preds, anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
             train_step_done = True
-
-        total_loss = anomalies_loss + diagnostics_loss
+            batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
+            batch_preds = (anomalies_preds if batch_preds is None else torch.vstack((batch_preds, anomalies_preds)))
 
         if train_step_done:
+            
+            # convert bath_preds to binary using pytorch:
+            batch_preds = (batch_preds > 0.5).float()
+            total_loss = anomalies_loss + diagnostics_loss
+            batch_accuracy = accuracy_score(batch_labels, batch_preds)
+            batch_precision = precision_score(batch_labels, batch_preds)
+            batch_recall = recall_score(batch_labels, batch_preds)
+            batch_f1 = f1_score(batch_labels, batch_preds)
+
             metrics_reporter.report({
                 'anomalies_loss': anomalies_loss, 
                 'diagnostics_loss': diagnostics_loss, 
-                'total_loss': total_loss})
+                'total_loss': total_loss,
+                'accuracy': batch_accuracy,
+                'precision': batch_precision,
+                'recall': batch_recall,
+                'f1': batch_f1})
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

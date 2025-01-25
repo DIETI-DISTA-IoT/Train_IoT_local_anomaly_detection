@@ -11,11 +11,12 @@
             "program": "consume.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--vehicle_name=alice",
+            "args": ["--vehicle_name=angela",
                         "--batch_size=2",
                         "--logging_level=DEBUG",
-                        "--weights_push_freq_seconds=5",
-                        "--weights_pull_freq_seconds=5"]
+                        //"--weights_push_freq_seconds=5",
+                        //"--weights_pull_freq_seconds=5"
+                        ]
         }
     ]
 }

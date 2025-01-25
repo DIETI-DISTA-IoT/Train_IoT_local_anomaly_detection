@@ -21,4 +21,4 @@ class Brain:
         loss = self.loss_function(y_pred, y)
         loss.backward()
         self.optimizer.step()
-        return loss.item()
+        return y_pred.detach(), loss.item()

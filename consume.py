@@ -12,6 +12,7 @@ from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import torch
+import signal
 
 received_all_real_msg = 0
 received_anomalies_msg = 0
@@ -107,6 +108,8 @@ def consume_vehicle_data():
     """
         Consume messages for a specific vehicle from Kafka topics.
     """
+    global consumer
+
     anomaly_topic = f"{VEHICLE_NAME}_anomalies"
     diagnostic_topic = f"{VEHICLE_NAME}_normal_data"
     stats_topic= f"{VEHICLE_NAME}_statistics"
@@ -121,7 +124,7 @@ def consume_vehicle_data():
     logger.info(f"will start consuming {anomaly_topic}, {diagnostic_topic}")
 
     try:
-        while True:
+        while not stop_threads:
             msg = consumer.poll(5.0)  # Poll per 1 secondo
             if msg is None:
                 continue
@@ -146,7 +149,7 @@ def consume_vehicle_data():
 
 
 def push_weights(**kwargs):
-    while True:
+    while not stop_threads:
         time.sleep(kwargs.get('weights_push_freq_seconds', 300))
         weights_reporter.push_weights(brain.model.state_dict())
 
@@ -154,7 +157,7 @@ def push_weights(**kwargs):
 def pull_weights(**kwargs):
     global brain
 
-    while True:
+    while not stop_threads:
         time.sleep(kwargs.get('weights_pull_freq_seconds', 300))        
         new_weights = global_weights_puller.pull_weights()
         if new_weights:
@@ -168,7 +171,7 @@ def train_model(**kwargs):
     batch_size = kwargs.get('batch_size', 32)
     
 
-    while True:
+    while not stop_threads:
         batch_labels = None
         batch_preds = None
         train_step_done = False
@@ -202,8 +205,14 @@ def train_model(**kwargs):
             batch_recall = recall_score(batch_labels, batch_preds)
             batch_f1 = f1_score(batch_labels, batch_preds)
 
-            diagnostics_cluster_percentages = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15) / diagnostics_processed
-            anomalies_cluster_percentages = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15) / anomalies_processed
+            if len(diagnostics_clusters) > 0:
+                diagnostics_cluster_percentages = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15) / diagnostics_processed
+            else:
+                diagnostics_cluster_percentages = [0] * 15
+            if len(anomalies_clusters) > 0:
+                anomalies_cluster_percentages = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15) / anomalies_processed
+            else:
+                anomalies_cluster_percentages = [0] * 15
 
             metrics_reporter.report({
                 'anomalies_loss': anomalies_loss, 
@@ -219,12 +228,23 @@ def train_model(**kwargs):
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
 
+def signal_handler(sig, frame):
+    global stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
+    logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
+    stop_threads = True
+    stats_consuming_thread.join()
+    training_thread.join()
+    pushing_weights_thread.join()
+    pulling_weights_thread.join()
+    consumer.close()
+
+
 def main():
     """
         Start the consumer for the specific vehicle.
     """
     global VEHICLE_NAME, KAFKA_BROKER
-    global batch_size
+    global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
@@ -254,8 +274,8 @@ def main():
     anomalies_buffer = Buffer(args.buffer_size, label=1)
     diagnostics_buffer = Buffer(args.buffer_size, label=0)
 
-    stas_consuming_thread=threading.Thread(target=consume_vehicle_data)
-    stas_consuming_thread.daemon=True
+    stats_consuming_thread=threading.Thread(target=consume_vehicle_data)
+    stats_consuming_thread.daemon=True
 
     training_thread=threading.Thread(target=train_model, kwargs=vars(args))
     training_thread.daemon=True
@@ -266,15 +286,18 @@ def main():
     pulling_weights_thread=threading.Thread(target=pull_weights, kwargs=vars(args))
     pulling_weights_thread.daemon=True
     
-    stas_consuming_thread.start()
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
+    stop_threads = False
+
+    stats_consuming_thread.start()
     training_thread.start()
     pushing_weights_thread.start()
     pulling_weights_thread.start()
 
-    stas_consuming_thread.join()
-    training_thread.join()
-    pushing_weights_thread.join()
-    pulling_weights_thread.join()
+    while True:
+        time.sleep(1)
+        if not stats_consuming_thread.is_alive() or not training_thread.is_alive():
+            break
 
 
 if __name__=="__main__":

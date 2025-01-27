@@ -39,14 +39,21 @@ class Buffer:
         else:
             record_list = random.sample(self.buffer, n)
 
-        tensors = []
-        
-        for record in record_list:
-            tensors.append(dict_to_tensor(record))
-            x_batch = torch.stack(tensors)
-            y_batch = torch.tensor([[self.label]] * len(tensors)).to(torch.float32)
+        feature_tensors = []
+        cluster_labels = []
+        class_labels = []
 
-        if len(tensors) == 0:
-            x_batch, y_batch = [], []
+        for record in record_list:
+            cluster_label = int(record['cluster'])
+            record_copy = record.copy()
+            record_copy.pop('cluster', None)
+            feature_tensors.append(dict_to_tensor(record_copy))
+            cluster_labels.append(cluster_label)
         
-        return x_batch, y_batch
+        if len(record_list) > 0:
+            feature_tensors = torch.stack(feature_tensors)
+            cluster_labels = torch.tensor(cluster_labels).unsqueeze(1)
+            class_labels = torch.tensor([[self.label]] * len(feature_tensors)).to(torch.float32)
+
+        
+        return feature_tensors, class_labels, cluster_labels

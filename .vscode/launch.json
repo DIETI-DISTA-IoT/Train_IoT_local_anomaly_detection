@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": ["--vehicle_name=angela",
-                        "--batch_size=2",
+                        "--batch_size=5",
                         "--logging_level=DEBUG",
                         //"--weights_push_freq_seconds=5",
                         //"--weights_pull_freq_seconds=5"

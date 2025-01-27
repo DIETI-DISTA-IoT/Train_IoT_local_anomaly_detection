@@ -28,7 +28,7 @@ def create_consumer():
     return Consumer(conf_cons)
 
 
-def create_producer_statistic():
+def get_statistics_producer():
     conf_prod_stat={
         'bootstrap.servers': KAFKA_BROKER,  # Kafka broker URL
         'key.serializer': StringSerializer('utf_8'),
@@ -105,18 +105,18 @@ def consume_vehicle_data():
     """
         Consume messages for a specific vehicle from Kafka topics.
     """
-    topic_anomalies = f"{VEHICLE_NAME}_anomalies"
-    topic_normal_data = f"{VEHICLE_NAME}_normal_data"
-    topic_statistics= f"{VEHICLE_NAME}statistics"
+    anomaly_topic = f"{VEHICLE_NAME}_anomalies"
+    diagnostic_topic = f"{VEHICLE_NAME}_normal_data"
+    stats_topic= f"{VEHICLE_NAME}_statistics"
     weights_topic = f"{VEHICLE_NAME}_weights"
 
-    check_and_create_topics([topic_anomalies,topic_normal_data, topic_statistics])
+    check_and_create_topics([stats_topic, weights_topic])
 
     consumer = create_consumer()
-    producer = create_producer_statistic()
+    producer = get_statistics_producer()
 
-    consumer.subscribe([topic_anomalies, topic_normal_data])
-    logger.info(f"will start consuming {topic_anomalies}, {topic_normal_data}")
+    consumer.subscribe([anomaly_topic, diagnostic_topic])
+    logger.info(f"will start consuming {anomaly_topic}, {diagnostic_topic}")
 
     try:
         while True:
@@ -172,8 +172,8 @@ def train_model(**kwargs):
         train_step_done = False
         anomalies_loss = diagnostics_loss = 0
 
-        diagnostics_feats, diagnostics_labels = diagnostics_buffer.sample(batch_size)
-        anomalies_feats, anomalies_labels = anomalies_buffer.sample(batch_size)
+        diagnostics_feats, diagnostics_labels, diagnostics_clusters = diagnostics_buffer.sample(batch_size)
+        anomalies_feats, anomalies_labels, anomalies_clusters = anomalies_buffer.sample(batch_size)
 
         if len(diagnostics_feats) > 0:
             diagnostics_preds, diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)

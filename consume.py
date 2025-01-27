@@ -16,6 +16,8 @@ import torch
 received_all_real_msg = 0
 received_anomalies_msg = 0
 received_normal_msg = 0
+anomalies_processed = 0
+diagnostics_processed = 0
 
 
 def create_consumer():
@@ -161,7 +163,7 @@ def pull_weights(**kwargs):
 
 
 def train_model(**kwargs):
-    global brain
+    global brain, diagnostics_processed, anomalies_processed
 
     batch_size = kwargs.get('batch_size', 32)
     
@@ -180,12 +182,15 @@ def train_model(**kwargs):
             train_step_done = True
             batch_labels = diagnostics_labels
             batch_preds = diagnostics_preds
+            diagnostics_processed += len(diagnostics_feats)
 
         if len(anomalies_feats) > 0:
             anomalies_preds, anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
             train_step_done = True
             batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
             batch_preds = (anomalies_preds if batch_preds is None else torch.vstack((batch_preds, anomalies_preds)))
+            anomalies_processed += len(anomalies_feats)
+
 
         if train_step_done:
             
@@ -197,6 +202,9 @@ def train_model(**kwargs):
             batch_recall = recall_score(batch_labels, batch_preds)
             batch_f1 = f1_score(batch_labels, batch_preds)
 
+            diagnostics_cluster_percentages = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15) / diagnostics_processed
+            anomalies_cluster_percentages = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15) / anomalies_processed
+
             metrics_reporter.report({
                 'anomalies_loss': anomalies_loss, 
                 'diagnostics_loss': diagnostics_loss, 
@@ -204,7 +212,9 @@ def train_model(**kwargs):
                 'accuracy': batch_accuracy,
                 'precision': batch_precision,
                 'recall': batch_recall,
-                'f1': batch_f1})
+                'f1': batch_f1,
+                'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
+                'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

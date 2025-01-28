@@ -69,10 +69,16 @@ class WeightsPuller:
             'group.id': f'{self.vehicle_name}-consumer-group',  # Consumer group ID for message offset tracking
             'auto.offset.reset': 'earliest'  # Start reading from the earliest message if no offset is present
         })
-        self.consumer.subscribe(["global_weights"])
+        self.subscribe()
         self.logger = logging.getLogger("glob_weight_puller" + kwargs['container_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
+
+    def subscribe(self):
+        try:
+            self.consumer.subscribe(["global_weights"])
+        except Exception as e:
+            self.logger.error(f"Failed to subscribe to global weights topic: {e}")
 
     def pull_weights(self):
         weights = None

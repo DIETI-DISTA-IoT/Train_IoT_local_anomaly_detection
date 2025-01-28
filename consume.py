@@ -117,6 +117,7 @@ def subscribe_to_topics():
 
     topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_normal_data"]
     consumer.subscribe(topics)
+    global_weights_puller.subscribe()
     logger.debug(f"(re)subscribed to topics: {topics}")
 
 
@@ -267,6 +268,7 @@ def resubscribe():
             subscribe_to_topics()
         except Exception as e:
             logger.error(f"Error in periodic resubscription: {e}")
+
 
 def main():
     """

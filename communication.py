@@ -88,7 +88,7 @@ class WeightsPuller:
                 self.logger.debug("No new global weights received.")
             elif not msg.error():
                 weights = pickle.loads(msg.value())
-                self.logger.debug(f"Received new global weights")
+                self.logger.info(f"Received new global weights")
             elif msg.error().code() != KafkaError._PARTITION_EOF:
                 self.logger.error(f"Error while consuming weights: {msg.error()}")
         except Exception as e:

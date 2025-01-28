@@ -217,7 +217,7 @@ def train_model(**kwargs):
             batch_preds = (batch_preds > 0.5).float()
             total_loss = anomalies_loss + diagnostics_loss
             batch_accuracy = accuracy_score(batch_labels, batch_preds)
-            batch_precision = precision_score(batch_labels, batch_preds)
+            batch_precision = precision_score(batch_labels, batch_preds, zero_division=0)
             batch_recall = recall_score(batch_labels, batch_preds)
             batch_f1 = f1_score(batch_labels, batch_preds)
 
@@ -292,7 +292,7 @@ def main():
     VEHICLE_NAME = args.vehicle_name
     KAFKA_BROKER = args.kafka_broker
 
-    logging.debug(f"Starting consumer for vehicle {VEHICLE_NAME}")    
+    print(f"Starting consumer for vehicle {VEHICLE_NAME}")    
 
     brain = Brain(**vars(args))
     metrics_reporter = MetricsReporter(**vars(args))

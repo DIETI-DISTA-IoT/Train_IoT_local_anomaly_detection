@@ -85,7 +85,7 @@ class WeightsPuller:
         try:
             msg = self.consumer.poll(timeout=10.0)
             if msg is None:
-                self.logger.debug("No new global weights received.")
+                self.logger.info("No new global weights received.")
             elif not msg.error():
                 weights = pickle.loads(msg.value())
                 self.logger.info(f"Received new global weights")

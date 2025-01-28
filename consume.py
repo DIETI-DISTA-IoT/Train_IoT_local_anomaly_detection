@@ -336,6 +336,7 @@ def main():
     while True:
         time.sleep(1)
         if not stats_consuming_thread.is_alive() or not training_thread.is_alive():
+            logger.info("Exiting main thread.")
             break
 
 

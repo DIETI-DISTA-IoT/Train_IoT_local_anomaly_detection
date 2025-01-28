@@ -16,7 +16,7 @@
                         "--logging_level=DEBUG",
                         //"--learning_rate=0.021",
                         //"--weights_push_freq_seconds=5",
-                        //"--weights_pull_freq_seconds=5"
+                        "--weights_pull_freq_seconds=5"
                         ]
         }
     ]

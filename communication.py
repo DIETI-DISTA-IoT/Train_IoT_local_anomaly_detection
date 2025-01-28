@@ -81,6 +81,7 @@ class WeightsPuller:
             self.logger.error(f"Failed to subscribe to global weights topic: {e}")
 
     def pull_weights(self):
+        # self.logger.debug("Pulling global weights")
         weights = None
         try:
             msg = self.consumer.poll(timeout=10.0)

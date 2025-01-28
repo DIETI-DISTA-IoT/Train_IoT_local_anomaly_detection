@@ -15,7 +15,7 @@ class WeightsReporter:
          }
         self.producer = SerializingProducer(conf_prod_weights)
 
-        self.logger = logging.getLogger("WEIGHTSUPLOADER" + kwargs['container_name'])
+        self.logger = logging.getLogger("weights_upload_" + kwargs['container_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
     
 
@@ -24,7 +24,7 @@ class WeightsReporter:
         try:
             self.producer.produce(topic=weights_topic, value=weights)
             self.producer.flush()
-            self.logger.debug(f"Published to topic: {weights_topic}")
+            self.logger.info(f"Published to topic: {weights_topic}")
         except Exception as e:
             self.logger.error(f"Failed to produce weights: {e}")
 
@@ -40,7 +40,7 @@ class MetricsReporter:
          }
         
         self.producer = SerializingProducer(conf_prod_stat)    
-        self.logger = logging.getLogger("REPORTER_" + kwargs['container_name'])
+        self.logger = logging.getLogger("metrics_reporter_" + kwargs['container_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
     def report(self, metrics):
@@ -70,7 +70,7 @@ class WeightsPuller:
             'auto.offset.reset': 'earliest'  # Start reading from the earliest message if no offset is present
         })
         self.consumer.subscribe(["global_weights"])
-        self.logger = logging.getLogger("GLOBAL_WEIGHTS_PULLER_" + kwargs['container_name'])
+        self.logger = logging.getLogger("glob_weight_puller" + kwargs['container_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
 

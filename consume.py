@@ -104,6 +104,18 @@ def process_message(topic, msg, producer):
     received_all_real_msg += 1
 
 
+
+def subscribe_to_topics():
+    """
+        Subscribe to a list of Kafka topics.
+    """
+    global consumer
+
+    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_normal_data"]
+    consumer.subscribe(topics)
+    logger.debug(f"(re)subscribed to topics: {topics}")
+
+
 def consume_vehicle_data():
     """
         Consume messages for a specific vehicle from Kafka topics.
@@ -120,8 +132,7 @@ def consume_vehicle_data():
     consumer = create_consumer()
     producer = get_statistics_producer()
 
-    consumer.subscribe([anomaly_topic, diagnostic_topic])
-    logger.info(f"will start consuming {anomaly_topic}, {diagnostic_topic}")
+    subscribe_to_topics()
 
     try:
         while not stop_threads:
@@ -239,6 +250,15 @@ def signal_handler(sig, frame):
     consumer.close()
 
 
+def resubscribe():
+    while  not stop_threads:
+        try:
+            # Wait for a certain interval before resubscribing
+            time.sleep(resubscribe_interval_seconds)
+            subscribe_to_topics()
+        except Exception as e:
+            logger.error(f"Error in periodic resubscription: {e}")
+
 def main():
     """
         Start the consumer for the specific vehicle.
@@ -246,6 +266,7 @@ def main():
     global VEHICLE_NAME, KAFKA_BROKER
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
+    global resubscribe_interval_seconds
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
@@ -256,6 +277,7 @@ def main():
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval between weights push')
     parser.add_argument('--weights_pull_freq_seconds', type=int, default=300, help='Seconds interval between weights pulling from coordinator')
+    parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15, help='Seconds interval between Kafka topic update')
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)
@@ -274,6 +296,10 @@ def main():
     anomalies_buffer = Buffer(args.buffer_size, label=1)
     diagnostics_buffer = Buffer(args.buffer_size, label=0)
 
+    resubscribe_interval_seconds = args.kafka_topic_update_interval_secs
+    resubscription_thread = threading.Thread(target=resubscribe)
+    resubscription_thread.daemon = True
+    
     stats_consuming_thread=threading.Thread(target=consume_vehicle_data)
     stats_consuming_thread.daemon=True
 
@@ -293,7 +319,8 @@ def main():
     training_thread.start()
     pushing_weights_thread.start()
     pulling_weights_thread.start()
-
+    resubscription_thread.start()
+    
     while True:
         time.sleep(1)
         if not stats_consuming_thread.is_alive() or not training_thread.is_alive():

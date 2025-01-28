@@ -289,6 +289,7 @@ def main():
     parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval between weights push')
     parser.add_argument('--weights_pull_freq_seconds', type=int, default=300, help='Seconds interval between weights pulling from coordinator')
     parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15, help='Seconds interval between Kafka topic update')
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)

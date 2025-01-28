@@ -8,7 +8,7 @@ class Brain:
     def __init__(self, **kwargs):
         self.model = MLP(kwargs.get('input_dim', 59), kwargs.get('output_dim', 1), **kwargs)
         optim_class_name = kwargs.get('optimizer', 'Adam')
-        self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), **kwargs.get('optimizer_params', {}))
+        self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
         self.loss_function = nn.BCELoss()
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)

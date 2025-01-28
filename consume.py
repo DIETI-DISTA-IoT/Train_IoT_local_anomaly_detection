@@ -108,7 +108,6 @@ def process_message(topic, msg, producer):
     received_all_real_msg += 1
 
 
-
 def subscribe_to_topics():
     """
         Subscribe to a list of Kafka topics.
@@ -253,11 +252,6 @@ def signal_handler(sig, frame):
     global stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
     stop_threads = True
-    stats_consuming_thread.join()
-    training_thread.join()
-    pushing_weights_thread.join()
-    pulling_weights_thread.join()
-    consumer.close()
 
 
 def resubscribe():
@@ -333,11 +327,16 @@ def main():
     pulling_weights_thread.start()
     resubscription_thread.start()
     
-    while True:
+    while not stop_threads:
         time.sleep(1)
-        if not stats_consuming_thread.is_alive() or not training_thread.is_alive():
-            logger.info("Exiting main thread.")
-            break
+    
+    stats_consuming_thread.join(1)
+    training_thread.join(1)
+    pushing_weights_thread.join(1)
+    pulling_weights_thread.join(1)
+    consumer.close()
+    logger.info("Exiting main thread.")
+    
 
 
 if __name__=="__main__":

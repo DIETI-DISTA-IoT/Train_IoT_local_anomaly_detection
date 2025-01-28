@@ -19,6 +19,10 @@ received_anomalies_msg = 0
 received_normal_msg = 0
 anomalies_processed = 0
 diagnostics_processed = 0
+diagnostics_clusters_count = torch.zeros(15)
+anomalies_clusters_count = torch.zeros(15)
+diagnostics_cluster_percentages =torch.zeros(15)
+anomalies_cluster_percentages = torch.zeros(15)
 
 
 def create_consumer():
@@ -93,7 +97,7 @@ def process_message(topic, msg, producer):
     """
     global received_all_real_msg, received_anomalies_msg, received_normal_msg
 
-    logger.debug(f"Processing message from topic [{topic}]")
+    # logger.debug(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
@@ -178,6 +182,7 @@ def pull_weights(**kwargs):
 
 def train_model(**kwargs):
     global brain, diagnostics_processed, anomalies_processed
+    global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
 
     batch_size = kwargs.get('batch_size', 32)
     
@@ -217,13 +222,15 @@ def train_model(**kwargs):
             batch_f1 = f1_score(batch_labels, batch_preds)
 
             if len(diagnostics_clusters) > 0:
-                diagnostics_cluster_percentages = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15) / diagnostics_processed
-            else:
-                diagnostics_cluster_percentages = [0] * 15
+                batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
+                diagnostics_clusters_count += batch_diag_clusters
+                diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_processed
+                        
             if len(anomalies_clusters) > 0:
-                anomalies_cluster_percentages = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15) / anomalies_processed
-            else:
-                anomalies_cluster_percentages = [0] * 15
+                batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15)
+                anomalies_clusters_count += batch_anom_clusters
+                anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
+
 
             metrics_reporter.report({
                 'anomalies_loss': anomalies_loss, 
@@ -233,6 +240,8 @@ def train_model(**kwargs):
                 'precision': batch_precision,
                 'recall': batch_recall,
                 'f1': batch_f1,
+                'diagnostics_processed': diagnostics_processed,
+                'anomalies_processed': anomalies_processed,
                 'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
                 'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
 

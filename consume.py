@@ -176,7 +176,7 @@ def pull_weights(**kwargs):
         time.sleep(kwargs.get('weights_pull_freq_seconds', 300))        
         new_weights = global_weights_puller.pull_weights()
         if new_weights:
-            brain.model.load_state_dict(new_weights)
+            brain.update_weights(new_weights)
             logger.info("Local weights updated using global model.")
 
 

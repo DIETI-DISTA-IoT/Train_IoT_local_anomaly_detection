@@ -20,9 +20,9 @@ received_normal_msg = 0
 anomalies_processed = 0
 diagnostics_processed = 0
 diagnostics_clusters_count = torch.zeros(15)
-anomalies_clusters_count = torch.zeros(15)
+anomalies_clusters_count = torch.zeros(19)
 diagnostics_cluster_percentages =torch.zeros(15)
-anomalies_cluster_percentages = torch.zeros(15)
+anomalies_cluster_percentages = torch.zeros(19)
 
 
 def create_consumer():
@@ -227,7 +227,7 @@ def train_model(**kwargs):
                 diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_processed
                         
             if len(anomalies_clusters) > 0:
-                batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=15)
+                batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=19)
                 anomalies_clusters_count += batch_anom_clusters
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
 

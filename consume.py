@@ -14,6 +14,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import torch
 import signal
 
+batch_counter = 0
 received_all_real_msg = 0
 received_anomalies_msg = 0
 received_normal_msg = 0
@@ -23,7 +24,13 @@ diagnostics_clusters_count = torch.zeros(15)
 anomalies_clusters_count = torch.zeros(19)
 diagnostics_cluster_percentages =torch.zeros(15)
 anomalies_cluster_percentages = torch.zeros(19)
-
+epoch_anomalies_loss = 0
+epoch_diagnostics_loss = 0
+epoch_total_loss = 0
+epoch_accuracy = 0
+epoch_precision = 0
+epoch_recall = 0
+epoch_f1 = 0
 
 def create_consumer():
     # Kafka consumer configuration
@@ -181,11 +188,12 @@ def pull_weights(**kwargs):
 
 
 def train_model(**kwargs):
-    global brain, diagnostics_processed, anomalies_processed
+    global brain, diagnostics_processed, anomalies_processed, batch_counter
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
+    global epoch_anomalies_loss, epoch_diagnostics_loss, epoch_total_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
 
     batch_size = kwargs.get('batch_size', 32)
-    
+    epoch_size = kwargs.get('epoch_batches', 50)
 
     while not stop_threads:
         batch_labels = None
@@ -211,8 +219,9 @@ def train_model(**kwargs):
             anomalies_processed += len(anomalies_feats)
 
 
+
         if train_step_done:
-            
+            batch_counter += 1
             # convert bath_preds to binary using pytorch:
             batch_preds = (batch_preds > 0.5).float()
             total_loss = anomalies_loss + diagnostics_loss
@@ -231,19 +240,38 @@ def train_model(**kwargs):
                 anomalies_clusters_count += batch_anom_clusters
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
 
+            epoch_anomalies_loss += anomalies_loss
+            epoch_diagnostics_loss += diagnostics_loss
+            epoch_total_loss += total_loss
+            epoch_accuracy += batch_accuracy
+            epoch_precision += batch_precision
+            epoch_recall += batch_recall
+            epoch_f1 += batch_f1
 
-            metrics_reporter.report({
-                'anomalies_loss': anomalies_loss, 
-                'diagnostics_loss': diagnostics_loss, 
-                'total_loss': total_loss,
-                'accuracy': batch_accuracy,
-                'precision': batch_precision,
-                'recall': batch_recall,
-                'f1': batch_f1,
-                'diagnostics_processed': diagnostics_processed,
-                'anomalies_processed': anomalies_processed,
-                'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
-                'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
+            if batch_counter % epoch_size == 0:
+
+                epoch_anomalies_loss /= epoch_size
+                epoch_diagnostics_loss /= epoch_size
+                epoch_total_loss /= epoch_size
+                epoch_accuracy /= epoch_size
+                epoch_precision /= epoch_size
+                epoch_recall /= epoch_size
+                epoch_f1 /= epoch_size
+
+                metrics_reporter.report({
+                    'anomalies_loss': epoch_anomalies_loss, 
+                    'diagnostics_loss': epoch_diagnostics_loss, 
+                    'total_loss': epoch_total_loss,
+                    'accuracy': epoch_accuracy,
+                    'precision': epoch_precision,
+                    'recall': epoch_recall,
+                    'f1': epoch_f1,
+                    'diagnostics_processed': diagnostics_processed,
+                    'anomalies_processed': anomalies_processed,
+                    'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
+                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
+                
+                epoch_anomalies_loss = epoch_diagnostics_loss = epoch_total_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
@@ -271,7 +299,7 @@ def main():
     global VEHICLE_NAME, KAFKA_BROKER
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
-    global resubscribe_interval_seconds
+    global resubscribe_interval_seconds, epoch_batches
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
@@ -284,6 +312,8 @@ def main():
     parser.add_argument('--weights_pull_freq_seconds', type=int, default=300, help='Seconds interval between weights pulling from coordinator')
     parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15, help='Seconds interval between Kafka topic update')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
+    parser.add_argument('--epoch_size', type=int, defatult=50, help='Number of batches per epoch (for reporting purposes)')
+    parser.add_argument('--training_freq_seconds', type=int, default=1, help='Seconds interval between training steps')
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)

@@ -227,8 +227,8 @@ def train_model(**kwargs):
             total_loss = anomalies_loss + diagnostics_loss
             batch_accuracy = accuracy_score(batch_labels, batch_preds)
             batch_precision = precision_score(batch_labels, batch_preds, zero_division=0)
-            batch_recall = recall_score(batch_labels, batch_preds)
-            batch_f1 = f1_score(batch_labels, batch_preds)
+            batch_recall = recall_score(batch_labels, batch_preds, zero_division=0)
+            batch_f1 = f1_score(batch_labels, batch_preds, zero_division=0)
 
             if len(diagnostics_clusters) > 0:
                 batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)

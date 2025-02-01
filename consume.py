@@ -305,7 +305,7 @@ def main():
     parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15, help='Seconds interval between Kafka topic update')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
     parser.add_argument('--epoch_size', type=int, default=50, help='Number of batches per epoch (for reporting purposes)')
-    parser.add_argument('--training_freq_seconds', type=int, default=1, help='Seconds interval between training steps')
+    parser.add_argument('--training_freq_seconds', type=float, default=1, help='Seconds interval between training steps')
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)

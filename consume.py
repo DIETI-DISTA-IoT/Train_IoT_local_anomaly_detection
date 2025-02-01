@@ -24,9 +24,7 @@ diagnostics_clusters_count = torch.zeros(15)
 anomalies_clusters_count = torch.zeros(19)
 diagnostics_cluster_percentages =torch.zeros(15)
 anomalies_cluster_percentages = torch.zeros(19)
-epoch_anomalies_loss = 0
-epoch_diagnostics_loss = 0
-epoch_total_loss = 0
+epoch_loss = 0
 epoch_accuracy = 0
 epoch_precision = 0
 epoch_recall = 0
@@ -190,41 +188,41 @@ def pull_weights(**kwargs):
 def train_model(**kwargs):
     global brain, diagnostics_processed, anomalies_processed, batch_counter
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
-    global epoch_anomalies_loss, epoch_diagnostics_loss, epoch_total_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
+    global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
 
     batch_size = kwargs.get('batch_size', 32)
     epoch_size = kwargs.get('epoch_batches', 50)
 
     while not stop_threads:
+        batch_feats = None
         batch_labels = None
         batch_preds = None
-        train_step_done = False
-        anomalies_loss = diagnostics_loss = 0
+        do_train_step = False
+        batch_loss = 0
 
         diagnostics_feats, diagnostics_labels, diagnostics_clusters = diagnostics_buffer.sample(batch_size)
         anomalies_feats, anomalies_labels, anomalies_clusters = anomalies_buffer.sample(batch_size)
 
         if len(diagnostics_feats) > 0:
-            diagnostics_preds, diagnostics_loss = brain.train_step(diagnostics_feats, diagnostics_labels)
-            train_step_done = True
+            batch_feats = diagnostics_feats
+            do_train_step = True
             batch_labels = diagnostics_labels
-            batch_preds = diagnostics_preds
             diagnostics_processed += len(diagnostics_feats)
 
         if len(anomalies_feats) > 0:
-            anomalies_preds, anomalies_loss = brain.train_step(anomalies_feats, anomalies_labels)
-            train_step_done = True
+            do_train_step = True
+            batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
             batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
-            batch_preds = (anomalies_preds if batch_preds is None else torch.vstack((batch_preds, anomalies_preds)))
             anomalies_processed += len(anomalies_feats)
 
-
-
-        if train_step_done:
+        if do_train_step:
             batch_counter += 1
+            batch_preds, loss = brain.train_step(batch_feats, batch_labels)
+
+
             # convert bath_preds to binary using pytorch:
             batch_preds = (batch_preds > 0.5).float()
-            total_loss = anomalies_loss + diagnostics_loss
+            batch_loss += loss
             batch_accuracy = accuracy_score(batch_labels, batch_preds)
             batch_precision = precision_score(batch_labels, batch_preds, zero_division=0)
             batch_recall = recall_score(batch_labels, batch_preds, zero_division=0)
@@ -240,9 +238,7 @@ def train_model(**kwargs):
                 anomalies_clusters_count += batch_anom_clusters
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
 
-            epoch_anomalies_loss += anomalies_loss
-            epoch_diagnostics_loss += diagnostics_loss
-            epoch_total_loss += total_loss
+            epoch_loss += batch_loss
             epoch_accuracy += batch_accuracy
             epoch_precision += batch_precision
             epoch_recall += batch_recall
@@ -250,18 +246,14 @@ def train_model(**kwargs):
 
             if batch_counter % epoch_size == 0:
 
-                epoch_anomalies_loss /= epoch_size
-                epoch_diagnostics_loss /= epoch_size
-                epoch_total_loss /= epoch_size
+                epoch_loss /= epoch_size
                 epoch_accuracy /= epoch_size
                 epoch_precision /= epoch_size
                 epoch_recall /= epoch_size
                 epoch_f1 /= epoch_size
 
                 metrics_reporter.report({
-                    'anomalies_loss': epoch_anomalies_loss, 
-                    'diagnostics_loss': epoch_diagnostics_loss, 
-                    'total_loss': epoch_total_loss,
+                    'total_loss': epoch_loss,
                     'accuracy': epoch_accuracy,
                     'precision': epoch_precision,
                     'recall': epoch_recall,
@@ -271,7 +263,7 @@ def train_model(**kwargs):
                     'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
                     'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
                 
-                epoch_anomalies_loss = epoch_diagnostics_loss = epoch_total_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
@@ -305,7 +297,7 @@ def main():
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
     parser.add_argument('--container_name', type=str, default='generic_consumer', help='Name of the container')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
-    parser.add_argument('--buffer_size', type=int, default=100, help='Size of the message buffer')
+    parser.add_argument('--buffer_size', type=int, default=10000, help='Size of the message buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval between weights push')

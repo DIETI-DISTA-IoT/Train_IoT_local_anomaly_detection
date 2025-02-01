@@ -21,11 +21,10 @@ class Brain:
             self.model.train()
             self.optimizer.zero_grad()
             y_pred = self.model(x)
-            y_pred_clamped = torch.clamp(y_pred, 0, 1)
-            loss = self.loss_function(y_pred_clamped, y)
+            loss = self.loss_function(y_pred, y)
             loss.backward()
             self.optimizer.step()
-            return y_pred_clamped.detach(), loss.item()
+            return y_pred.detach(), loss.item()
     
     def update_weights(self, new_weights):
         """

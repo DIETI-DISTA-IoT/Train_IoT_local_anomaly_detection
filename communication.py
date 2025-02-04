@@ -1,5 +1,5 @@
 from confluent_kafka import SerializingProducer, Consumer, KafkaError
-from confluent_kafka.serialization import StringSerializer, BytesSerializer
+from confluent_kafka.serialization import StringSerializer
 import json
 import logging
 import pickle
@@ -12,7 +12,6 @@ class WeightsReporter:
         self.vehicle_name = kwargs.get('vehicle_name')
         conf_prod_weights={
         'bootstrap.servers': kafka_broker_url,  # Kafka broker URL
-        'key.serializer': BytesSerializer(),
         'value.serializer': self._serialize_state_dict
          }
         self.producer = SerializingProducer(conf_prod_weights)

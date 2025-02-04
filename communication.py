@@ -3,8 +3,6 @@ from confluent_kafka.serialization import StringSerializer
 import json
 import logging
 import pickle
-import io
-import torch
 
 class WeightsReporter:
     def __init__(self, **kwargs):
@@ -12,19 +10,14 @@ class WeightsReporter:
         self.vehicle_name = kwargs.get('vehicle_name')
         conf_prod_weights={
         'bootstrap.servers': kafka_broker_url,  # Kafka broker URL
-        'value.serializer': self._serialize_state_dict
+        'key.serializer': StringSerializer('utf_8'),
+        'value.serializer': lambda v, ctx: pickle.dumps(v)
          }
         self.producer = SerializingProducer(conf_prod_weights)
 
         self.logger = logging.getLogger("weights_upload_" + kwargs['container_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
     
-
-    def _serialize_state_dict(self, state_dict, ctx):
-        """Serialize PyTorch state dict to bytes using torch.save"""
-        buffer = io.BytesIO()
-        torch.save(state_dict, buffer)
-        return buffer.getvalue()
 
     def push_weights(self, weights):
         weights_topic=f"{self.vehicle_name}_weights"
@@ -87,14 +80,6 @@ class WeightsPuller:
         except Exception as e:
             self.logger.error(f"Failed to subscribe to global weights topic: {e}")
 
-
-    @staticmethod
-    def deserialize_state_dict(bytes_data):
-        """Deserialize bytes back to PyTorch state dict"""
-        buffer = io.BytesIO(bytes_data)
-        return torch.load(buffer)
-    
-
     def pull_weights(self):
         # self.logger.debug("Pulling global weights")
         weights = None
@@ -103,7 +88,7 @@ class WeightsPuller:
             if msg is None:
                 self.logger.info("No new global weights received.")
             elif not msg.error():
-                weights = self.deserialize_state_dict(msg.value())
+                weights = pickle.loads(msg.value())
                 self.logger.info(f"Received new global weights")
             elif msg.error().code() != KafkaError._PARTITION_EOF:
                 self.logger.error(f"Error while consuming weights: {msg.error()}")

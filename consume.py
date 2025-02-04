@@ -171,7 +171,8 @@ def consume_vehicle_data():
 def push_weights(**kwargs):
     while not stop_threads:
         time.sleep(kwargs.get('weights_push_freq_seconds', 300))
-        weights_reporter.push_weights(brain.model.state_dict())
+        weights_copy = brain.get_brain_state_copy()
+        weights_reporter.push_weights(weights_copy)
 
 
 def pull_weights(**kwargs):

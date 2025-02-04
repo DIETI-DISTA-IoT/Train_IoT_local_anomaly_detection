@@ -16,6 +16,7 @@ class Brain:
         self.model.to(self.device)
         self.model_lock = Lock()
 
+
     def train_step(self, x, y):
         with self.model_lock:
             self.model.train()
@@ -26,6 +27,12 @@ class Brain:
             self.optimizer.step()
             return y_pred.detach(), loss.item()
     
+
+    def get_brain_state_copy(self):
+        with self.model_lock:
+            return self.model.state_dict().detach().clone()
+
+
     def update_weights(self, new_weights):
         """
         Safely update the model weights while preserving gradients

@@ -30,7 +30,7 @@ class Brain:
 
     def get_brain_state_copy(self):
         with self.model_lock:
-            return self.model.state_dict().detach().clone()
+            return {k: v.detach().clone() for k, v in self.model.state_dict().items()}
 
 
     def update_weights(self, new_weights):

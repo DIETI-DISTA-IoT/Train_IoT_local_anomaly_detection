@@ -353,6 +353,7 @@ def main():
     while not stop_threads:
         time.sleep(1)
     
+    resubscription_thread.join(1)
     stats_consuming_thread.join(1)
     training_thread.join(1)
     pushing_weights_thread.join(1)

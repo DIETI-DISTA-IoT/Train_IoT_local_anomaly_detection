@@ -15,6 +15,7 @@ class Brain:
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
         self.model_lock = Lock()
+        self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
 
 
     def train_step(self, x, y):
@@ -32,6 +33,9 @@ class Brain:
         with self.model_lock:
             return {k: v.detach().clone() for k, v in self.model.state_dict().items()}
 
+    def save_model(self):
+        with self.model_lock:
+            torch.save(self.model.state_dict(), self.model_saving_path)
 
     def update_weights(self, new_weights):
         """

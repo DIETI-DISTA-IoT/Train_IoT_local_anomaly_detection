@@ -15,6 +15,7 @@ import torch
 import signal
 
 batch_counter = 0
+epoch_counter = 0
 received_all_real_msg = 0
 received_anomalies_msg = 0
 received_normal_msg = 0
@@ -187,12 +188,13 @@ def pull_weights(**kwargs):
 
 
 def train_model(**kwargs):
-    global brain, diagnostics_processed, anomalies_processed, batch_counter
+    global brain, diagnostics_processed, anomalies_processed, batch_counter, epoch_counter
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
     global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
 
     batch_size = kwargs.get('batch_size', 32)
     epoch_size = kwargs.get('epoch_batches', 50)
+    save_model_freq_epochs = kwargs.get('save_model_freq_epochs', 10)
 
     while not stop_threads:
         batch_feats = None
@@ -246,6 +248,7 @@ def train_model(**kwargs):
             epoch_f1 += batch_f1
 
             if batch_counter % epoch_size == 0:
+                epoch_counter += 1
 
                 epoch_loss /= epoch_size
                 epoch_accuracy /= epoch_size
@@ -265,6 +268,11 @@ def train_model(**kwargs):
                     'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
                 
                 epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+
+                if epoch_counter % save_model_freq_epochs == 0:
+                    model_path = kwargs.get('model_saving_path', 'default_model.pth')
+                    logger.info(f"Saving model after {epoch_counter} epochs as {model_path}.")
+                    brain.save_model()
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 
@@ -307,6 +315,9 @@ def main():
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
     parser.add_argument('--epoch_size', type=int, default=50, help='Number of batches per epoch (for reporting purposes)')
     parser.add_argument('--training_freq_seconds', type=float, default=1, help='Seconds interval between training steps')
+    parser.add_argument('--save_model_freq_epochs', type=int, default=10, help='Number of epochs between model saving')
+    parser.add_argument('--model_saving_path', type=str, default='default_model.pth', help='Path to save the model')
+
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)

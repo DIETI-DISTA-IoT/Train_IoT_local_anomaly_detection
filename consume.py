@@ -107,17 +107,20 @@ def process_message(topic, msg, producer):
         Process the deserialized message based on its topic.
     """
     global received_all_real_msg, received_anomalies_msg, received_normal_msg, anomalies_processed, diagnostics_processed
-
+    counting_message = False
     # logger.debug(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
         anomalies_processed += 1
+        counting_message = True
     elif topic.endswith("_normal_data"):
         diagnostics_buffer.add(msg)
         received_normal_msg += 1
         diagnostics_processed += 1
-    received_all_real_msg += 1
+        counting_message = True
+    if counting_message:
+        received_all_real_msg += 1
     if received_all_real_msg % 500 == 0:
         logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
 

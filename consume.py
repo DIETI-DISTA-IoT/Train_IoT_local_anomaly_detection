@@ -90,7 +90,7 @@ def deserialize_message(msg):
     try:
         # Decode the message and deserialize it into a Python dictionary
         message_value = json.loads(msg.value().decode('utf-8'))
-        print(f"received message from topic [{msg.topic()}]")
+        logger.debug(f"received message from topic [{msg.topic()}]")
         return message_value
     except json.JSONDecodeError as e:
         logger.error(f"Error deserializing message: {e}")
@@ -101,16 +101,17 @@ def process_message(topic, msg, producer):
     """
         Process the deserialized message based on its topic.
     """
-    global received_all_real_msg, received_anomalies_msg, received_normal_msg
+    global received_all_real_msg, received_anomalies_msg, received_normal_msg, anomalies_processed, diagnostics_processed
 
     # logger.debug(f"Processing message from topic [{topic}]")
     if topic.endswith("_anomalies"):
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
+        anomalies_processed += 1
     elif topic.endswith("_normal_data"):
         diagnostics_buffer.add(msg)
         received_normal_msg += 1
-
+        diagnostics_processed += 1
     received_all_real_msg += 1
 
 
@@ -234,11 +235,13 @@ def train_model(**kwargs):
             if len(diagnostics_clusters) > 0:
                 batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
                 diagnostics_clusters_count += batch_diag_clusters
+                assert diagnostics_processed > 0, "Diagnostics processed is zero."
                 diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_processed
                         
             if len(anomalies_clusters) > 0:
                 batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=19)
                 anomalies_clusters_count += batch_anom_clusters
+                assert anomalies_processed > 0, "Anomalies processed is zero."
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
 
             epoch_loss += batch_loss
@@ -321,7 +324,12 @@ def main():
     args = parser.parse_args()
 
     logger = logging.getLogger(args.container_name)
-    logger.setLevel(str(args.logging_level).upper())
+    ch = logging.StreamHandler()
+    ch.setLevel(str(args.logging_level).upper())
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
 
     VEHICLE_NAME = args.vehicle_name
     KAFKA_BROKER = args.kafka_broker

@@ -13,6 +13,8 @@ from communication import MetricsReporter, WeightsReporter, WeightsPuller
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import torch
 import signal
+import string
+import random
 
 batch_counter = 0
 epoch_counter = 0
@@ -32,10 +34,13 @@ epoch_recall = 0
 epoch_f1 = 0
 
 def create_consumer():
+    def generate_random_string(length=10):
+        letters = string.ascii_letters + string.digits
+        return ''.join(random.choice(letters) for i in range(length))
     # Kafka consumer configuration
     conf_cons = {
         'bootstrap.servers': KAFKA_BROKER,  # Kafka broker URL
-        'group.id': f'{VEHICLE_NAME}-consumer-group',  # Consumer group ID for message offset tracking
+        'group.id': f'{VEHICLE_NAME}-consumer-group'+generate_random_string(7),  # Consumer group ID for message offset tracking
         'auto.offset.reset': 'earliest'  # Start reading from the earliest message if no offset is present
     }
     return Consumer(conf_cons)
@@ -211,13 +216,11 @@ def train_model(**kwargs):
             batch_feats = diagnostics_feats
             do_train_step = True
             batch_labels = diagnostics_labels
-            diagnostics_processed += len(diagnostics_feats)
 
         if len(anomalies_feats) > 0:
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
             batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
-            anomalies_processed += len(anomalies_feats)
 
         if do_train_step:
             batch_counter += 1
@@ -323,13 +326,8 @@ def main():
 
     args = parser.parse_args()
 
-    logger = logging.getLogger(args.container_name)
-    ch = logging.StreamHandler()
-    ch.setLevel(str(args.logging_level).upper())
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger(args.container_name+'_'+'consumer')
 
     VEHICLE_NAME = args.vehicle_name
     KAFKA_BROKER = args.kafka_broker

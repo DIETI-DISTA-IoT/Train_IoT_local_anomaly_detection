@@ -3,27 +3,11 @@ import torch
 import numpy as np
 
 def dict_to_tensor(data_dict):
-    # Initialize an empty list to hold numerical values
-    values = []
     
-    # Iterate through the dictionary
-    for key, value in data_dict.items():
-        # Check if the value is a number or nan
-        if isinstance(value, (int, float)):
-            if not np.isnan(value):
-                if not np.isinf(value):
-                    values.append(value)
-                else: 
-                    values.append(30000)
-            else:
-                values.append(0.0)
-        else: 
-            # Replace nan with 0 or any other placeholder
-            values.append(0.0)  # You can change this to any other placeholder if needed
-    
+    uncampled_values = [ (value  if isinstance(value, (int, float)) and not np.isnan(value) else 0.0) for value in data_dict.values() ]
+    clampled_values = [ max(min(value, 30000), -4000) for value in uncampled_values ]
     # Convert the list of values to a PyTorch tensor
-    tensor = torch.tensor(values, dtype=torch.float32)
-    
+    tensor = torch.tensor(clampled_values, dtype=torch.float32)
     return tensor
 
 

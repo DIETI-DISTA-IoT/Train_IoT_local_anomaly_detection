@@ -118,7 +118,8 @@ def process_message(topic, msg, producer):
         received_normal_msg += 1
         diagnostics_processed += 1
     received_all_real_msg += 1
-
+    if received_all_real_msg % 500 == 0:
+        logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
 
 def subscribe_to_topics():
     """

@@ -15,6 +15,8 @@ import torch
 import signal
 import string
 import random
+import os
+
 
 batch_counter = 0
 epoch_counter = 0
@@ -313,8 +315,6 @@ def main():
     global resubscribe_interval_seconds, epoch_batches
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
-    parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')
-    parser.add_argument('--container_name', type=str, default='generic_consumer', help='Name of the container')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
     parser.add_argument('--buffer_size', type=int, default=10000, help='Size of the message buffer')
     parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
@@ -330,10 +330,14 @@ def main():
 
     args = parser.parse_args()
 
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(args.container_name+'_'+'consumer')
+    VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
+    assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."
 
-    VEHICLE_NAME = args.vehicle_name
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger(VEHICLE_NAME+'_'+'consumer')
+
+    
+
     KAFKA_BROKER = args.kafka_broker
 
     print(f"Starting consumer for vehicle {VEHICLE_NAME}")    

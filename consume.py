@@ -332,6 +332,7 @@ def main():
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."
+    args.vehicle_name = VEHICLE_NAME
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(VEHICLE_NAME+'_'+'consumer')

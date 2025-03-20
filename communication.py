@@ -15,7 +15,7 @@ class WeightsReporter:
          }
         self.producer = SerializingProducer(conf_prod_weights)
 
-        self.logger = logging.getLogger("weights_upload_" + kwargs['vechicle_name'])
+        self.logger = logging.getLogger("weights_upload_" + kwargs['vehicle_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
     
 
@@ -40,7 +40,7 @@ class MetricsReporter:
          }
         
         self.producer = SerializingProducer(conf_prod_stat)    
-        self.logger = logging.getLogger("metrics_reporter_" + kwargs['vechicle_name'])
+        self.logger = logging.getLogger("metrics_reporter_" + kwargs['vehicle_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
     def report(self, metrics):
@@ -70,7 +70,7 @@ class WeightsPuller:
             'auto.offset.reset': 'earliest'  # Start reading from the earliest message if no offset is present
         })
         self.subscribe()
-        self.logger = logging.getLogger("glob_weight_puller" + kwargs['vechicle_name'])
+        self.logger = logging.getLogger("glob_weight_puller" + kwargs['vehicle_name'])
         self.logger.setLevel(kwargs.get('logging_level', str(kwargs.get('logging_level', 'INFO')).upper()))
 
 

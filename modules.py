@@ -6,10 +6,12 @@ class MLP(nn.Module):
         h_dim = kwargs.get('h_dim', 128)
         dropout = kwargs.get('dropout', 0.1)
         num_layers = kwargs.get('num_layers', 3)
-
+        layer_norm = kwargs.get('layer_norm', False)
         layers = []
         curr_output_dim = h_dim
         curr_input_dim = input_dim
+        if layer_norm:
+            layers.append(nn.LayerNorm(curr_input_dim))
         for _ in range(num_layers):
             layers.append(nn.Linear(curr_input_dim, curr_output_dim))
             layers.append(nn.ReLU())

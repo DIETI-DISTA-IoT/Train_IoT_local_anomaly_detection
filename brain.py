@@ -8,7 +8,7 @@ from threading import Lock
 class Brain:
 
     def __init__(self, **kwargs):
-        self.model = MLP(kwargs.get('input_dim', 59), kwargs.get('output_dim', 1), **kwargs)
+        self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer', 'Adam')
         self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
         self.loss_function = nn.BCELoss()

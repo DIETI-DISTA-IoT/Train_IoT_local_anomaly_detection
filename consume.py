@@ -333,7 +333,7 @@ def main():
     parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
     parser.add_argument('--optimizer', type=str, default='Adam', help='Optimizer')
     parser.add_argument('--layer_norm', action='store_true', help='Use layer normalization')
-
+    parser.add_argument('--input_dim', type=int, default=59, help='Input dimension of the model')
     args = parser.parse_args()
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')

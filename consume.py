@@ -327,6 +327,12 @@ def main():
     parser.add_argument('--training_freq_seconds', type=float, default=1, help='Seconds interval between training steps')
     parser.add_argument('--save_model_freq_epochs', type=int, default=10, help='Number of epochs between model saving')
     parser.add_argument('--model_saving_path', type=str, default='default_model.pth', help='Path to save the model')
+    parser.add_argument('--output_dim', type=int, default=1, help='Output dimension of the model')
+    parser.add_argument('--h_dim', type=int, default=128, help='Hidden dimension of the model')
+    parser.add_argument('--num_layers', type=int, default=3, help='Number of layers in the model')
+    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    parser.add_argument('--optimizer', type=str, default='Adam', help='Optimizer')
+    parser.add_argument('--layer_norm', action='store_true', help='Use layer normalization')
 
     args = parser.parse_args()
 

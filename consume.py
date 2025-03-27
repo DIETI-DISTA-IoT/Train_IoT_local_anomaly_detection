@@ -244,14 +244,12 @@ def train_model(**kwargs):
             if len(diagnostics_clusters) > 0:
                 batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
                 diagnostics_clusters_count += batch_diag_clusters
-                assert diagnostics_processed > 0, "Diagnostics processed is zero."
-                diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_processed
+                diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_clusters_count.sum()
                         
             if len(anomalies_clusters) > 0:
                 batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=19)
                 anomalies_clusters_count += batch_anom_clusters
-                assert anomalies_processed > 0, "Anomalies processed is zero."
-                anomalies_cluster_percentages = anomalies_clusters_count / anomalies_processed
+                anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
 
             epoch_loss += batch_loss
             epoch_accuracy += batch_accuracy
@@ -280,6 +278,8 @@ def train_model(**kwargs):
                     'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
                 
                 epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                diagnostics_clusters_count = torch.zeros(15)
+                anomalies_clusters_count = torch.zeros(19)
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')

@@ -104,7 +104,7 @@ def deserialize_message(msg):
         return None
 
 
-def process_message(topic, msg, producer):
+def process_message(topic, msg):
     """
         Process the deserialized message based on its topic.
     """
@@ -144,8 +144,6 @@ def consume_vehicle_data():
     """
     global consumer
 
-    anomaly_topic = f"{VEHICLE_NAME}_anomalies"
-    diagnostic_topic = f"{VEHICLE_NAME}_normal_data"
     stats_topic= f"{VEHICLE_NAME}_statistics"
     weights_topic = f"{VEHICLE_NAME}_weights"
 
@@ -170,7 +168,7 @@ def consume_vehicle_data():
 
             deserialized_data = deserialize_message(msg)
             if deserialized_data:
-                process_message(msg.topic(), deserialized_data, producer)
+                process_message(msg.topic(), deserialized_data)
 
     except KeyboardInterrupt:
         logger.info(f"consumer interrupted by user.")

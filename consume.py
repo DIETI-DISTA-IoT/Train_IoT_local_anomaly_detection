@@ -305,6 +305,14 @@ def resubscribe():
             logger.error(f"Error in periodic resubscription: {e}")
 
 
+def parse_str_list(arg):
+    # Split the input string by commas and convert each element to int
+    try:
+        return [str(x) for x in arg.split(',')]
+    except ValueError:
+        raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
+    
+
 def main():
     """
         Start the consumer for the specific vehicle.
@@ -334,6 +342,9 @@ def main():
     parser.add_argument('--optimizer', type=str, default='Adam', help='Optimizer')
     parser.add_argument('--layer_norm', action='store_true', help='Use layer normalization')
     parser.add_argument('--input_dim', type=int, default=59, help='Input dimension of the model')
+    parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
+    parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
+
     args = parser.parse_args()
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')

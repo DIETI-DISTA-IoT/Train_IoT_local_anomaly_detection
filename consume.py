@@ -35,6 +35,9 @@ epoch_precision = 0
 epoch_recall = 0
 epoch_f1 = 0
 average_param = 'binary'
+online_batch_labels = []
+online_batch_preds = []
+mitigation_reward = 0
 
 def create_consumer():
     def generate_random_string(length=10):

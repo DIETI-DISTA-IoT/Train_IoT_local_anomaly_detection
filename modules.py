@@ -7,6 +7,7 @@ class MLP(nn.Module):
         dropout = kwargs.get('dropout', 0.1)
         num_layers = kwargs.get('num_layers', 3)
         layer_norm = kwargs.get('layer_norm', False)
+        
         layers = []
         curr_output_dim = h_dim
         curr_input_dim = input_dim
@@ -20,7 +21,11 @@ class MLP(nn.Module):
             curr_output_dim = curr_output_dim // 2
 
         layers.append(nn.Linear(curr_input_dim, output_dim))
-        layers.append(nn.Sigmoid())
+        
+        if kwargs.get('mode') == 'OF':
+            layers.append(nn.Sigmoid())
+        else:
+            layers.append(nn.Softmax(dim=1))
 
         self.model = nn.Sequential(*layers)
 

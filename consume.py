@@ -15,7 +15,7 @@ import signal
 import string
 import random
 import os
-
+import numpy as np
 
 batch_counter = 0
 epoch_counter = 0
@@ -357,7 +357,7 @@ def train_model(**kwargs):
                     }
 
                 if mode == 'SW': 
-                    metrics_dict['mitigation_time'] = mitigation_times.sum() / len(mitigation_times)
+                    metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
                     metrics_dict['mitigation_reward'] = mitigation_reward
 
                 metrics_reporter.report(metrics_dict)

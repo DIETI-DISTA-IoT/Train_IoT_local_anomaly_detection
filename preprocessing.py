@@ -9,6 +9,8 @@ def dict_to_tensor(data_dict):
     # Convert the list of values to a PyTorch tensor
     # tensor = torch.tensor(clampled_values, dtype=torch.float32)
     tensor = torch.tensor(uncampled_values, dtype=torch.float32)
+    # remove torch inf values: 
+    tensor = torch.nan_to_num(tensor, nan=0.0, posinf=1e6, neginf=-1e6)
     return tensor
 
 

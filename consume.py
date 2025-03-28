@@ -3,10 +3,9 @@ import logging
 import threading
 import json
 import time
-from confluent_kafka import Consumer, KafkaError, KafkaException, SerializingProducer
+from confluent_kafka import Consumer, KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
-from confluent_kafka.serialization import StringSerializer
-
+import requests
 from preprocessing import Buffer, dict_to_tensor
 from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
@@ -37,7 +36,10 @@ epoch_f1 = 0
 average_param = 'binary'
 online_batch_labels = []
 online_batch_preds = []
+mitigation_times = []
 mitigation_reward = 0
+
+HOST_IP = os.getenv("HOST_IP")
 
 def create_consumer():
     def generate_random_string(length=10):
@@ -133,7 +135,7 @@ def mitigation_and_rewarding(prediction, current_label):
         if prediction == current_label:
             # True positive.
             if MITIGATION:
-                # send_attack_mitigation_request(VEHICLE_NAME)
+                send_attack_mitigation_request(VEHICLE_NAME)
                 pass
             mitigation_reward += true_positive_reward
         else:
@@ -228,6 +230,21 @@ def consume_vehicle_data():
     finally:
         consumer.close()
         logger.info(f"consumer for {VEHICLE_NAME} closed.")
+
+
+def send_attack_mitigation_request(vehicle_name):
+    global mitigation_times
+
+    url = f"http://{HOST_IP}:{MANAGER_PORT}/stop-attack"
+    data = {"vehicle_name": vehicle_name, "origin": "AI"}
+    response = requests.post(url, json=data)
+    try:
+        response_json = response.json()
+        logger.debug(f"Mitigate-attack Response JSON: {response_json}")
+        mitigation_times.append(response_json.get('mitigation_time', 0))
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from response: {e}")
+        response_json = {}
 
 
 def push_weights(**kwargs):
@@ -339,7 +356,9 @@ def train_model(**kwargs):
                     'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
                     }
 
-                if mode == 'SW': metrics_dict['mitigation_reward'] = mitigation_reward
+                if mode == 'SW': 
+                    metrics_dict['mitigation_time'] = mitigation_times / len(mitigation_times)
+                    metrics_dict['mitigation_reward'] = mitigation_reward
 
                 metrics_reporter.report(metrics_dict)
                 
@@ -348,6 +367,7 @@ def train_model(**kwargs):
                 anomalies_clusters_count = torch.zeros(19)
                 online_batch_labels = []
                 online_batch_preds = []
+                mitigation_times = []
                 mitigation_reward = 0
 
                 if epoch_counter % save_model_freq_epochs == 0:
@@ -382,11 +402,15 @@ def parse_str_list(arg):
         raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
     
 
+def configure_no_proxy():
+    os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
+
+
 def main():
     """
         Start the consumer for the specific vehicle.
     """
-    global VEHICLE_NAME, KAFKA_BROKER, MITIGATION, mode, average_param
+    global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global resubscribe_interval_seconds, epoch_batches
@@ -419,13 +443,20 @@ def main():
     parser.add_argument('--true_negative_reward', type=float, default=-0.4, help='Reward for a true negative prediction')
     parser.add_argument('--false_positive_reward', type=float, default=-4, help='Reward for a false positive prediction')
     parser.add_argument('--false_negative_reward', type=float, default=-8, help='Reward for a false negative prediction')
-    
+    parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
+
     args = parser.parse_args()
+
     MITIGATION = args.mitigation
+    MANAGER_PORT = args.manager_port
+
     true_positive_reward = args.true_positive_reward
     true_negative_reward = args.true_negative_reward
     false_positive_reward = args.false_positive_reward
     false_negative_reward = args.false_negative_reward
+
+    if args.no_proxy_host:
+        configure_no_proxy()
 
     mode = args.mode
     if mode == 'SW':

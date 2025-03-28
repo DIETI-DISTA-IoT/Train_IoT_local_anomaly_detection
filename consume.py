@@ -444,6 +444,7 @@ def main():
     parser.add_argument('--false_positive_reward', type=float, default=-4, help='Reward for a false positive prediction')
     parser.add_argument('--false_negative_reward', type=float, default=-8, help='Reward for a false negative prediction')
     parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
+    parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
 
     args = parser.parse_args()
 

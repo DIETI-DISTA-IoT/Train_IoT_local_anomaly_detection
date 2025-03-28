@@ -30,8 +30,10 @@ class Brain:
             y_pred = self.model(x)
             if self.mode == 'OF':
                 loss = self.loss_function(y_pred, y)
-            else:
+            elif y_pred.shape[0] > 1:   # SW batch of 1 elem
                 loss = self.loss_function(y_pred, y.long().squeeze())
+            else:                       # SW batch of more elems
+                loss = self.loss_function(y_pred.squeeze(), y.long().squeeze())           
             loss.backward()
             self.optimizer.step()
             return y_pred.detach(), loss.item()

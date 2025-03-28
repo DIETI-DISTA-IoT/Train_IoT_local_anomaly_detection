@@ -7,7 +7,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, SerializingPro
 from confluent_kafka.admin import AdminClient, NewTopic
 from confluent_kafka.serialization import StringSerializer
 
-from preprocessing import Buffer
+from preprocessing import Buffer, dict_to_tensor
 from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -34,6 +34,10 @@ epoch_accuracy = 0
 epoch_precision = 0
 epoch_recall = 0
 epoch_f1 = 0
+online_batch_labels = []
+online_batch_preds = []
+average_param = 'binary'
+mitigation_reward = 0
 
 def create_consumer():
     def generate_random_string(length=10):
@@ -111,6 +115,9 @@ def process_message(topic, msg):
     global received_all_real_msg, received_anomalies_msg, received_normal_msg, anomalies_processed, diagnostics_processed
     counting_message = False
     # logger.debug(f"Processing message from topic [{topic}]")
+
+    
+
     if topic.endswith("_anomalies"):
         anomalies_buffer.add(msg)
         received_anomalies_msg += 1
@@ -123,8 +130,83 @@ def process_message(topic, msg):
         counting_message = True
     if counting_message:
         received_all_real_msg += 1
+        online_classification(topic, msg)
+
     if received_all_real_msg % 500 == 0:
         logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
+
+
+def mitigation_and_rewarding(prediction, current_label):
+    global mitigation_reward
+    if prediction == 1:
+        if prediction == current_label:
+            # True positive.
+            if MITIGATION:
+                # send_attack_mitigation_request(VEHICLE_NAME)
+                pass
+            mitigation_reward += true_positive_reward
+        else:
+            # False positive
+            mitigation_reward += false_positive_reward
+    else:
+        if prediction == current_label:
+            # True negative
+            mitigation_reward += true_negative_reward
+        else:
+            # False negative
+            mitigation_reward += false_negative_reward
+
+
+def online_classification(topic, msg):
+    global online_batch_labels, online_batch_preds, mitigation_reward
+
+    msg_copy = msg.copy()
+
+    class_label = int(topic.endswith("_anomalies"))
+    if mode == 'OF':
+        label = class_label
+    else:
+        attack_label = int(msg_copy['node_status'] == 'INFECTED')
+        msg_copy.pop('node_status', None)
+        label = 2*class_label + attack_label
+
+    msg_copy.pop('cluster', None)
+
+    brain.model.eval()
+    with brain.model_lock, torch.no_grad():
+        x = dict_to_tensor(msg_copy).unsqueeze(0)
+        y_pred = brain.model(x)
+        if mode == 'OF':
+            y_pred = (y_pred > 0.5).float()
+        else:
+            y_pred = y_pred.argmax(dim=1)
+
+    online_batch_labels.append(torch.tensor(label).float())
+    online_batch_preds.append(y_pred)
+
+    if mode == 'SW': mitigation_and_rewarding(y_pred, attack_label)
+    
+    if len(online_batch_labels) % 50 == 0:
+        online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
+        online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+        online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+        online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+        online_metrics_dict = {
+                    'online_accuracy': online_batch_accuracy,
+                    'online_precision': online_batch_precision,
+                    'online_recall': online_batch_recall,
+                    'online_f1': online_batch_f1
+                    }
+        if mode == 'SW': online_metrics_dict['mitigation_reward'] = mitigation_reward
+        
+        metrics_reporter.report(online_metrics_dict)
+        logger.debug(f"Online metrics: {online_metrics_dict}")
+        
+        online_batch_labels = []
+        online_batch_preds = []
+        mitigation_reward = 0
+
+
 
 def subscribe_to_topics():
     """
@@ -233,10 +315,8 @@ def train_model(**kwargs):
             # convert bath_preds to binary using pytorch:
             if mode == 'OF':
                 batch_preds = (batch_preds > 0.5).float()
-                average_param='binary'
             else:
                 batch_preds = torch.argmax(batch_preds, dim=1)
-                average_param='macro'
 
             batch_loss += loss
             batch_accuracy = accuracy_score(batch_labels, batch_preds)
@@ -320,10 +400,11 @@ def main():
     """
         Start the consumer for the specific vehicle.
     """
-    global VEHICLE_NAME, KAFKA_BROKER, mode
+    global VEHICLE_NAME, KAFKA_BROKER, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global resubscribe_interval_seconds, epoch_batches
+    global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
     parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
@@ -347,13 +428,25 @@ def main():
     parser.add_argument('--input_dim', type=int, default=59, help='Input dimension of the model')
     parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
     parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-
+    parser.add_argument('--mitigation', action="store_true", help='Perform mitigation since SM launching or attend explicit command')
+    parser.add_argument('--true_positive_reward', type=float, default=1.0, help='Reward for a true positive prediction')
+    parser.add_argument('--true_negative_reward', type=float, default=-0.4, help='Reward for a true negative prediction')
+    parser.add_argument('--false_positive_reward', type=float, default=-4, help='Reward for a false positive prediction')
+    parser.add_argument('--false_negative_reward', type=float, default=-8, help='Reward for a false negative prediction')
+    
     args = parser.parse_args()
+    MITIGATION = args.mitigation
+    true_positive_reward = args.true_positive_reward
+    true_negative_reward = args.true_negative_reward
+    false_positive_reward = args.false_positive_reward
+    false_negative_reward = args.false_negative_reward
 
     mode = args.mode
     if mode == 'SW':
         args.input_dim = args.input_dim + len(args.probe_metrics)
         args.output_dim = 4
+        average_param = 'macro'
+
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."

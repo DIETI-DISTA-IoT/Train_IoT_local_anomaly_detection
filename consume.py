@@ -175,28 +175,7 @@ def online_classification(topic, msg):
     online_batch_labels.append(torch.tensor(label).float())
     online_batch_preds.append(y_pred)
 
-    if mode == 'SW': mitigation_and_rewarding(y_pred, attack_label)
-    
-    if len(online_batch_labels) % 50 == 0:
-        online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
-        online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-        online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-        online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-        online_metrics_dict = {
-                    'online_accuracy': online_batch_accuracy,
-                    'online_precision': online_batch_precision,
-                    'online_recall': online_batch_recall,
-                    'online_f1': online_batch_f1
-                    }
-        if mode == 'SW': online_metrics_dict['mitigation_reward'] = mitigation_reward
-        
-        metrics_reporter.report(online_metrics_dict)
-        logger.debug(f"Online metrics: {online_metrics_dict}")
-        
-        online_batch_labels = []
-        online_batch_preds = []
-        mitigation_reward = 0
-
+    if mode == 'SW': mitigation_and_rewarding(y_pred, attack_label)        
 
 
 def subscribe_to_topics():
@@ -339,7 +318,12 @@ def train_model(**kwargs):
                 epoch_recall /= epoch_size
                 epoch_f1 /= epoch_size
 
-                metrics_reporter.report({
+                online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
+                online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+
+                metrics_dict = {
                     'total_loss': epoch_loss,
                     'accuracy': epoch_accuracy,
                     'precision': epoch_precision,
@@ -347,12 +331,24 @@ def train_model(**kwargs):
                     'f1': epoch_f1,
                     'diagnostics_processed': diagnostics_processed,
                     'anomalies_processed': anomalies_processed,
+                    'online_accuracy': online_batch_accuracy,
+                    'online_precision': online_batch_precision,
+                    'online_recall': online_batch_recall,
+                    'online_f1': online_batch_f1,
                     'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
-                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()})
+                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
+                    }
+
+                if mode == 'SW': metrics_dict['mitigation_reward'] = mitigation_reward
+
+                metrics_reporter.report(metrics_dict)
                 
                 epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
                 diagnostics_clusters_count = torch.zeros(15)
                 anomalies_clusters_count = torch.zeros(19)
+                online_batch_labels = []
+                online_batch_preds = []
+                mitigation_reward = 0
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')

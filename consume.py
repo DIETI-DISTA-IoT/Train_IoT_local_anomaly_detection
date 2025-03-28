@@ -269,7 +269,7 @@ def train_model(**kwargs):
     global brain, diagnostics_processed, anomalies_processed, batch_counter, epoch_counter
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
     global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
-    global online_batch_labels, online_batch_preds, mitigation_reward
+    global online_batch_labels, online_batch_preds, mitigation_reward, mitigation_times
     batch_size = kwargs.get('batch_size', 32)
     epoch_size = kwargs.get('epoch_batches', 50)
     save_model_freq_epochs = kwargs.get('save_model_freq_epochs', 10)

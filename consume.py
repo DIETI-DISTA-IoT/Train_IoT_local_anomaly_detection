@@ -232,14 +232,19 @@ def train_model(**kwargs):
             batch_counter += 1
             batch_preds, loss = brain.train_step(batch_feats, batch_labels)
 
-
             # convert bath_preds to binary using pytorch:
-            batch_preds = (batch_preds > 0.5).float()
+            if mode == 'OF':
+                batch_preds = (batch_preds > 0.5).float()
+                average_param='binary'
+            else:
+                batch_preds = torch.argmax(batch_preds, dim=1)
+                average_param='macro'
+
             batch_loss += loss
             batch_accuracy = accuracy_score(batch_labels, batch_preds)
-            batch_precision = precision_score(batch_labels, batch_preds, zero_division=0)
-            batch_recall = recall_score(batch_labels, batch_preds, zero_division=0)
-            batch_f1 = f1_score(batch_labels, batch_preds, zero_division=0)
+            batch_precision = precision_score(batch_labels, batch_preds, zero_division=0, average=average_param)
+            batch_recall = recall_score(batch_labels, batch_preds, zero_division=0, average=average_param)
+            batch_f1 = f1_score(batch_labels, batch_preds, zero_division=0, average=average_param)
 
             if len(diagnostics_clusters) > 0:
                 batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
@@ -317,7 +322,7 @@ def main():
     """
         Start the consumer for the specific vehicle.
     """
-    global VEHICLE_NAME, KAFKA_BROKER
+    global VEHICLE_NAME, KAFKA_BROKER, mode
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global resubscribe_interval_seconds, epoch_batches
@@ -347,6 +352,11 @@ def main():
 
     args = parser.parse_args()
 
+    mode = args.mode
+    if mode == 'SW':
+        args.input_dim = args.input_dim + len(args.probe_metrics)
+        args.output_dim = 4
+
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."
     args.vehicle_name = VEHICLE_NAME
@@ -365,8 +375,8 @@ def main():
     weights_reporter = WeightsReporter(**vars(args))
     global_weights_puller = WeightsPuller(**vars(args))
 
-    anomalies_buffer = Buffer(args.buffer_size, label=1)
-    diagnostics_buffer = Buffer(args.buffer_size, label=0)
+    anomalies_buffer = Buffer(args.buffer_size, label=1, mode=mode)
+    diagnostics_buffer = Buffer(args.buffer_size, label=0, mode=mode)
 
     resubscribe_interval_seconds = args.kafka_topic_update_interval_secs
     resubscription_thread = threading.Thread(target=resubscribe)

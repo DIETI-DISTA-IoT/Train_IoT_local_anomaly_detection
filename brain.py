@@ -11,7 +11,12 @@ class Brain:
         self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer', 'Adam')
         self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
-        self.loss_function = nn.BCELoss()
+        self.mode = kwargs.get('mode', 'OF')
+        if self.mode == 'OF':
+            self.loss_function = nn.BCELoss()
+        else:
+            self.loss_function = nn.CrossEntropyLoss()
+
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
         self.model_lock = Lock()
@@ -23,7 +28,10 @@ class Brain:
             self.model.train()
             self.optimizer.zero_grad()
             y_pred = self.model(x)
-            loss = self.loss_function(y_pred, y)
+            if self.mode == 'OF':
+                loss = self.loss_function(y_pred, y)
+            else:
+                loss = self.loss_function(y_pred, y.long().squeeze())
             loss.backward()
             self.optimizer.step()
             return y_pred.detach(), loss.item()

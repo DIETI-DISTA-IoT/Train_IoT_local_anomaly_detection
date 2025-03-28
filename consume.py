@@ -52,15 +52,6 @@ def create_consumer():
     return Consumer(conf_cons)
 
 
-def get_statistics_producer():
-    conf_prod_stat={
-        'bootstrap.servers': KAFKA_BROKER,  # Kafka broker URL
-        'key.serializer': StringSerializer('utf_8'),
-        'value.serializer': lambda v, ctx: json.dumps(v)
-    }
-    return SerializingProducer(conf_prod_stat)
-
-
 def check_and_create_topics(topic_list):
     """
     Check if the specified topics exist in Kafka, and create them if missing.
@@ -232,7 +223,6 @@ def consume_vehicle_data():
     check_and_create_topics([stats_topic, weights_topic])
 
     consumer = create_consumer()
-    producer = get_statistics_producer()
 
     subscribe_to_topics()
 

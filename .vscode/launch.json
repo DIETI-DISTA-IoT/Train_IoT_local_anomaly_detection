@@ -1,0 +1,23 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+       
+        {
+            "name": "CONS",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "consume.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--mode=SW",
+                    "--epoch_size=3",
+                    "--probe_metrics=RTT INBOUND OUTBOUND",
+                    "--batch_size=4",
+                    "--mitigation",
+                    "--no_proxy_host"]   
+        }
+    ]
+}

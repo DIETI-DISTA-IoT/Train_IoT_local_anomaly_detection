@@ -16,6 +16,8 @@ import string
 import random
 import os
 import numpy as np
+from threading import Lock
+
 
 batch_counter = 0
 epoch_counter = 0
@@ -40,6 +42,16 @@ mitigation_times = []
 mitigation_reward = 0
 
 HOST_IP = os.getenv("HOST_IP")
+
+
+def thread_safe_lock(lock):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            with lock:
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 
 def create_consumer():
     def generate_random_string(length=10):
@@ -152,6 +164,7 @@ def mitigation_and_rewarding(prediction, current_label):
 
 def online_classification(topic, msg):
     global online_batch_labels, online_batch_preds, mitigation_reward
+    global lists_lock
 
     msg_copy = msg.copy()
 
@@ -174,9 +187,10 @@ def online_classification(topic, msg):
         else:
             y_pred = y_pred.argmax(dim=1)
 
-    online_batch_labels.append(torch.tensor(label).float())
-    online_batch_preds.append(y_pred)
-
+    # acquire lists lock
+    with lists_lock:
+        online_batch_labels.append(torch.tensor(label).float())
+        online_batch_preds.append(y_pred)
     if mode == 'SW': mitigation_and_rewarding(y_pred, attack_label)        
 
 
@@ -233,7 +247,7 @@ def consume_vehicle_data():
 
 
 def send_attack_mitigation_request(vehicle_name):
-    global mitigation_times
+    global mitigation_times, lists_lock
 
     url = f"http://{HOST_IP}:{MANAGER_PORT}/stop-attack"
     data = {"vehicle_name": vehicle_name, "origin": "AI"}
@@ -241,7 +255,8 @@ def send_attack_mitigation_request(vehicle_name):
     try:
         response_json = response.json()
         logger.debug(f"Mitigate-attack Response JSON: {response_json}")
-        mitigation_times.append(response_json.get('mitigation_time', 0))
+        with lists_lock:
+            mitigation_times.append(response_json.get('mitigation_time', 0))
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from response: {e}")
         response_json = {}
@@ -270,8 +285,12 @@ def train_model(**kwargs):
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
     global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
     global online_batch_labels, online_batch_preds, mitigation_reward, mitigation_times
+    global lists_lock
+    
+    lists_lock = Lock()
+
     batch_size = kwargs.get('batch_size', 32)
-    epoch_size = kwargs.get('epoch_batches', 50)
+    epoch_size = kwargs.get('epoch_size', 50)
     save_model_freq_epochs = kwargs.get('save_model_freq_epochs', 10)
 
     while not stop_threads:
@@ -327,48 +346,49 @@ def train_model(**kwargs):
             epoch_f1 += batch_f1
 
             if batch_counter % epoch_size == 0:
-                epoch_counter += 1
+                with lists_lock:
+                    epoch_counter += 1
 
-                epoch_loss /= epoch_size
-                epoch_accuracy /= epoch_size
-                epoch_precision /= epoch_size
-                epoch_recall /= epoch_size
-                epoch_f1 /= epoch_size
+                    epoch_loss /= epoch_size
+                    epoch_accuracy /= epoch_size
+                    epoch_precision /= epoch_size
+                    epoch_recall /= epoch_size
+                    epoch_f1 /= epoch_size
 
-                online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
-                online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                    online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
+                    online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                    online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                    online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
 
-                metrics_dict = {
-                    'total_loss': epoch_loss,
-                    'accuracy': epoch_accuracy,
-                    'precision': epoch_precision,
-                    'recall': epoch_recall,
-                    'f1': epoch_f1,
-                    'diagnostics_processed': diagnostics_processed,
-                    'anomalies_processed': anomalies_processed,
-                    'online_accuracy': online_batch_accuracy,
-                    'online_precision': online_batch_precision,
-                    'online_recall': online_batch_recall,
-                    'online_f1': online_batch_f1,
-                    'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
-                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
-                    }
+                    metrics_dict = {
+                        'total_loss': epoch_loss,
+                        'accuracy': epoch_accuracy,
+                        'precision': epoch_precision,
+                        'recall': epoch_recall,
+                        'f1': epoch_f1,
+                        'diagnostics_processed': diagnostics_processed,
+                        'anomalies_processed': anomalies_processed,
+                        'online_accuracy': online_batch_accuracy,
+                        'online_precision': online_batch_precision,
+                        'online_recall': online_batch_recall,
+                        'online_f1': online_batch_f1,
+                        'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
+                        'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
+                        }
 
-                if mode == 'SW': 
-                    metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
-                    metrics_dict['mitigation_reward'] = mitigation_reward
+                    if mode == 'SW': 
+                        metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
+                        metrics_dict['mitigation_reward'] = mitigation_reward
 
-                metrics_reporter.report(metrics_dict)
-                
-                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
-                diagnostics_clusters_count = torch.zeros(15)
-                anomalies_clusters_count = torch.zeros(19)
-                online_batch_labels = []
-                online_batch_preds = []
-                mitigation_times = []
-                mitigation_reward = 0
+                    metrics_reporter.report(metrics_dict)
+                    
+                    epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                    diagnostics_clusters_count = torch.zeros(15)
+                    anomalies_clusters_count = torch.zeros(19)
+                    online_batch_labels = []
+                    online_batch_preds = []
+                    mitigation_times = []
+                    mitigation_reward = 0
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')
@@ -397,9 +417,9 @@ def resubscribe():
 def parse_str_list(arg):
     # Split the input string by commas and convert each element to int
     try:
-        return [str(x) for x in arg.split(',')]
+        return [str(x) for x in arg.split(' ')]
     except ValueError:
-        raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
+        raise argparse.ArgumentTypeError("Arguments must be strings separated by spaces")
     
 
 def configure_no_proxy():

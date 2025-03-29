@@ -255,8 +255,14 @@ def send_attack_mitigation_request(vehicle_name):
     try:
         response_json = response.json()
         logger.debug(f"Mitigate-attack Response JSON: {response_json}")
-        with lists_lock:
-            mitigation_times.append(response_json.get('mitigation_time', 0))
+        mitigation_time = response_json.get('mitigation_time')
+        if mitigation_time is not None:
+            with lists_lock:
+                mitigation_times.append(mitigation_time)
+        else:
+            msg = response_json.get('message')
+            assert msg is not None
+            logger.warning(f"Mitigation req. failed. Answer: {msg}")
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from response: {e}")
         response_json = {}

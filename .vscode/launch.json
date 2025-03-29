@@ -17,7 +17,8 @@
                     "--probe_metrics=RTT,INBOUND,OUTBOUND",
                     "--batch_size=4",
                     "--mitigation",
-                    "--no_proxy_host"]   
+                    "--no_proxy_host",
+                    "--logging_level=debug"]   
         }
     ]
 }

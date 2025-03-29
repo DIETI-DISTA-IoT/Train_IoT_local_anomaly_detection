@@ -14,7 +14,7 @@
             "justMyCode": false,
             "args": ["--mode=SW",
                     "--epoch_size=3",
-                    "--probe_metrics=RTT INBOUND OUTBOUND",
+                    "--probe_metrics=RTT,INBOUND,OUTBOUND",
                     "--batch_size=4",
                     "--mitigation",
                     "--no_proxy_host"]   

@@ -417,9 +417,9 @@ def resubscribe():
 def parse_str_list(arg):
     # Split the input string by commas and convert each element to int
     try:
-        return [str(x) for x in arg.split(' ')]
+        return [str(x) for x in arg.split(',')]
     except ValueError:
-        raise argparse.ArgumentTypeError("Arguments must be strings separated by spaces")
+        raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
     
 
 def configure_no_proxy():

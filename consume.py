@@ -352,49 +352,59 @@ def train_model(**kwargs):
             epoch_f1 += batch_f1
 
             if batch_counter % epoch_size == 0:
-                with lists_lock:
-                    epoch_counter += 1
+                
+                epoch_counter += 1
 
-                    epoch_loss /= epoch_size
-                    epoch_accuracy /= epoch_size
-                    epoch_precision /= epoch_size
-                    epoch_recall /= epoch_size
-                    epoch_f1 /= epoch_size
+                epoch_loss /= epoch_size
+                epoch_accuracy /= epoch_size
+                epoch_precision /= epoch_size
+                epoch_recall /= epoch_size
+                epoch_f1 /= epoch_size
 
-                    online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
-                    online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                    online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                    online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                metrics_dict = {
+                    'total_loss': epoch_loss,
+                    'accuracy': epoch_accuracy,
+                    'precision': epoch_precision,
+                    'recall': epoch_recall,
+                    'f1': epoch_f1,
+                    'diagnostics_processed': diagnostics_processed,
+                    'anomalies_processed': anomalies_processed,
+                    'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
+                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
+                }
+                
+                if len(online_batch_labels) > 0:
+                    with lists_lock:
+                        online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
+                        online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                        online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                        online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
 
-                    metrics_dict = {
-                        'total_loss': epoch_loss,
-                        'accuracy': epoch_accuracy,
-                        'precision': epoch_precision,
-                        'recall': epoch_recall,
-                        'f1': epoch_f1,
-                        'diagnostics_processed': diagnostics_processed,
-                        'anomalies_processed': anomalies_processed,
+                    online_metrics_dict = {
                         'online_accuracy': online_batch_accuracy,
                         'online_precision': online_batch_precision,
                         'online_recall': online_batch_recall,
-                        'online_f1': online_batch_f1,
-                        'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
-                        'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
+                        'online_f1': online_batch_f1
                         }
 
                     if mode == 'SW': 
-                        metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
-                        metrics_dict['mitigation_reward'] = mitigation_reward
+                        online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
+                        online_metrics_dict['mitigation_reward'] = mitigation_reward
 
-                    metrics_reporter.report(metrics_dict)
-                    
-                    epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
-                    diagnostics_clusters_count = torch.zeros(15)
-                    anomalies_clusters_count = torch.zeros(19)
-                    online_batch_labels = []
-                    online_batch_preds = []
-                    mitigation_times = []
+                    metrics_dict.update(online_metrics_dict)
+                    with lists_lock:
+                        online_batch_labels = []
+                        online_batch_preds = []
+                        mitigation_times = []
                     mitigation_reward = 0
+
+
+                metrics_reporter.report(metrics_dict)
+                
+                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                diagnostics_clusters_count = torch.zeros(15)
+                anomalies_clusters_count = torch.zeros(19)
+                    
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')

@@ -77,7 +77,7 @@ class Buffer:
             cluster_labels = torch.tensor(cluster_labels).unsqueeze(1)
             
             if self.mode == 'SW':
-                class_labels = torch.tensor([[sereway_label]] * len(feature_tensors)).to(torch.float32)
+                class_labels = torch.tensor(sereway_labels).to(torch.float32)
             else:
                 class_labels = torch.tensor([[self.label]] * len(feature_tensors)).to(torch.float32)
 

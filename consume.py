@@ -318,6 +318,8 @@ def train_model(**kwargs):
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
             batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
+            if mode == 'SW':
+                batch_labels = batch_labels.flatten()
 
         if do_train_step:
             batch_counter += 1

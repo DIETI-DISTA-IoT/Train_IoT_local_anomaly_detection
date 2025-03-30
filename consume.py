@@ -121,21 +121,21 @@ def process_message(topic, msg):
     counting_message = False
     # logger.debug(f"Processing message from topic [{topic}]")
 
-    
-
     if topic.endswith("_anomalies"):
-        anomalies_buffer.add(msg)
+        feat_tensor, label_tensor, cluster_label_tensor = anomalies_buffer.format(msg)
+        anomalies_buffer.add(feat_tensor, label_tensor, cluster_label_tensor)
         received_anomalies_msg += 1
         anomalies_processed += 1
         counting_message = True
     elif topic.endswith("_normal_data"):
-        diagnostics_buffer.add(msg)
+        feat_tensor, label_tensor, cluster_label_tensor = diagnostics_buffer.format(msg)
+        diagnostics_buffer.add(feat_tensor, label_tensor, cluster_label_tensor)
         received_normal_msg += 1
         diagnostics_processed += 1
         counting_message = True
     if counting_message:
         received_all_real_msg += 1
-        online_classification(topic, msg)
+        online_classification(feat_tensor, label_tensor)
 
     if received_all_real_msg % 500 == 0:
         logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
@@ -143,18 +143,16 @@ def process_message(topic, msg):
 
 def mitigation_and_rewarding(prediction, current_label):
     global mitigation_reward
-    if prediction == 1:
-        if prediction == current_label:
+    if prediction == 1 or prediction == 3:
+        if current_label == 1 or current_label == 3:
             # True positive.
-            if MITIGATION:
-                send_attack_mitigation_request(VEHICLE_NAME)
-                pass
+            if MITIGATION: send_attack_mitigation_request(VEHICLE_NAME)
             mitigation_reward += true_positive_reward
         else:
             # False positive
             mitigation_reward += false_positive_reward
     else:
-        if prediction == current_label:
+        if current_label == 0 or current_label == 2:
             # True negative
             mitigation_reward += true_negative_reward
         else:
@@ -162,26 +160,14 @@ def mitigation_and_rewarding(prediction, current_label):
             mitigation_reward += false_negative_reward
 
 
-def online_classification(topic, msg):
+def online_classification(feat_tensor, label_tensor):
     global online_batch_labels, online_batch_preds, mitigation_reward
     global lists_lock
 
-    msg_copy = msg.copy()
-
-    class_label = int(topic.endswith("_anomalies"))
-    if mode == 'OF':
-        label = class_label
-    else:
-        attack_label = int(msg_copy['node_status'] == 'INFECTED')
-        msg_copy.pop('node_status', None)
-        label = 2*class_label + attack_label
-
-    msg_copy.pop('cluster', None)
-
     brain.model.eval()
     with brain.model_lock, torch.no_grad():
-        x = dict_to_tensor(msg_copy).unsqueeze(0)
-        y_pred = brain.model(x)
+        
+        y_pred = brain.model(feat_tensor.unsqueeze(0))
         if mode == 'OF':
             y_pred = (y_pred > 0.5).float()
         else:
@@ -189,9 +175,9 @@ def online_classification(topic, msg):
 
     # acquire lists lock
     with lists_lock:
-        online_batch_labels.append(torch.tensor(label).float())
+        online_batch_labels.append(label_tensor.float())
         online_batch_preds.append(y_pred)
-    if mode == 'SW': mitigation_and_rewarding(y_pred, attack_label)        
+    if mode == 'SW': mitigation_and_rewarding(y_pred, label_tensor)        
 
 
 def subscribe_to_topics():
@@ -318,6 +304,8 @@ def train_model(**kwargs):
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
             batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
+            if mode == 'SW':
+                batch_labels = batch_labels.flatten()
 
         if do_train_step:
             batch_counter += 1

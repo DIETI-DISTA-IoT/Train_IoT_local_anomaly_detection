@@ -50,7 +50,6 @@ class MLP(nn.Module):
 
             final_stream.append(nn.Linear(2, curr_output_dim))
             final_stream.append(nn.ReLU())    
-            final_stream.append(nn.Dropout(dropout))
             final_stream.append(nn.Linear(curr_output_dim, output_dim))
             final_stream.append(nn.Softmax(dim=1))   
         

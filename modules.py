@@ -9,8 +9,9 @@ class MLP(nn.Module):
         dropout = kwargs.get('dropout', 0.1)
         num_layers = kwargs.get('num_layers', 3)
         layer_norm = kwargs.get('layer_norm', False)
-        mode = kwargs.get('mode')
-        probe_len = len(kwargs.get('probe_metrics'))
+        self.mode = kwargs.get('mode')
+        self.aux_stream_input_dim = len(kwargs.get('probe_metrics'))
+        
 
         main_stream = []
         aux_stream = []
@@ -18,7 +19,7 @@ class MLP(nn.Module):
         # stream:
         if layer_norm:
             main_stream.append(nn.LayerNorm(input_dim))
-            aux_stream.append(nn.LayerNorm(probe_len))
+            aux_stream.append(nn.LayerNorm(self.aux_stream_input_dim))
 
         
         curr_output_dim = h_dim
@@ -34,9 +35,9 @@ class MLP(nn.Module):
         main_stream.append(nn.Sigmoid())
         self.main_stream = nn.Sequential(*main_stream)
 
-        if mode == 'SW':
+        if self.mode == 'SW':
             curr_output_dim = h_dim
-            curr_aux_input_dim = probe_len
+            curr_aux_input_dim = self.aux_stream_input_dim
 
             for _ in range(num_layers):
                 aux_stream.append(nn.Linear(curr_aux_input_dim, curr_output_dim))
@@ -47,23 +48,24 @@ class MLP(nn.Module):
             aux_stream.append(nn.Linear(curr_aux_input_dim, 1))
             aux_stream.append(nn.Sigmoid())
 
-            final_stream.append(nn.Linear(curr_main_input_dim + curr_aux_input_dim, curr_output_dim))
+            final_stream.append(nn.Linear(2, curr_output_dim))
             final_stream.append(nn.ReLU())    
             final_stream.append(nn.Dropout(dropout))
             final_stream.append(nn.Linear(curr_output_dim, output_dim))
             final_stream.append(nn.Softmax(dim=1))   
         
             self.aux_stream = nn.Sequential(*aux_stream)
-            self.final_stream = nn.Sequential(final_stream)
+            self.final_stream = nn.Sequential(*final_stream)
 
 
     def forward(self, x):
         main, aux, final = None, None, None
 
-        main = self.main_stream(x)
-
-        if self.mode == 'SW':
-            aux = self.aux_stream(x)
+        if self.mode == 'OF':
+            main = self.main_stream(x)
+        else:
+            main = self.main_stream(x[:, :-self.aux_stream_input_dim])
+            aux = self.aux_stream(x[:, -self.aux_stream_input_dim:])
             final = self.final_stream(torch.cat((main, aux), dim=1))
         
         return final, main, aux

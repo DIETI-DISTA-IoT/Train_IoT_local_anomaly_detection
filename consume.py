@@ -198,14 +198,14 @@ def online_classification(feat_tensor, final_label_tensor, main_label_tensor, au
     with lists_lock:
 
         online_main_batch_labels.append(main_label_tensor.float())
-        online_main_batch_preds.append(main_pred)
+        online_main_batch_preds.append(main_pred.squeeze())
 
         if mode == 'SW':
             online_aux_batch_labels.append(aux_label_tensor.float())
-            online_aux_batch_preds.append(aux_pred)
+            online_aux_batch_preds.append(aux_pred.squeeze())
 
             online_final_batch_labels.append(final_label_tensor.float())
-            online_final_batch_preds.append(final_pred)
+            online_final_batch_preds.append(final_pred.squeeze())
 
     if mode == 'SW': mitigation_and_rewarding(aux_pred, aux_label_tensor)        
 
@@ -322,6 +322,10 @@ def train_model(**kwargs):
         batch_feats = None
         batch_final_labels = None
         batch_final_preds = None
+        batch_main_labels = None
+        batch_main_preds = None
+        batch_aux_labels = None
+        batch_aux_preds = None
         do_train_step = False
         batch_loss = 0
 
@@ -349,18 +353,18 @@ def train_model(**kwargs):
             batch_main_preds = (batch_main_preds > 0.5).float()
 
             batch_main_accuracy = accuracy_score(batch_main_labels, batch_main_preds)
-            batch_main_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
-            batch_main_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
-            batch_main_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            batch_main_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0)
+            batch_main_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0)
+            batch_main_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0)
 
             if mode == 'SW':
                 batch_aux_preds = (batch_aux_preds > 0.5).float()
                 
 
                 batch_aux_accuracy = accuracy_score(batch_aux_labels, batch_aux_preds)
-                batch_aux_precision = precision_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
-                batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
-                batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                batch_aux_precision = precision_score(batch_aux_labels, batch_aux_preds, zero_division=0)
+                batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0)
+                batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0)
 
                 batch_final_preds = torch.argmax(batch_final_preds, dim=1)
 
@@ -448,9 +452,9 @@ def train_model(**kwargs):
                 if len(online_main_batch_labels) > 0:
                     with lists_lock:
                         online_main_batch_accuracy = accuracy_score(online_main_batch_labels, online_main_batch_preds)
-                        online_main_batch_precision = precision_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
-                        online_main_batch_recall = recall_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
-                        online_main_batch_f1 = f1_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
+                        online_main_batch_precision = precision_score(online_main_batch_labels, online_main_batch_preds, zero_division=0)
+                        online_main_batch_recall = recall_score(online_main_batch_labels, online_main_batch_preds, zero_division=0)
+                        online_main_batch_f1 = f1_score(online_main_batch_labels, online_main_batch_preds, zero_division=0)
 
                         if mode == 'SW':
                             online_final_batch_accuracy = accuracy_score(online_final_batch_labels, online_final_batch_preds)
@@ -460,9 +464,9 @@ def train_model(**kwargs):
 
 
                             online_aux_batch_accuracy = accuracy_score(online_aux_batch_labels, online_aux_batch_preds)
-                            online_aux_batch_precision = precision_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
-                            online_aux_batch_recall = recall_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
-                            online_aux_batch_f1 = f1_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
+                            online_aux_batch_precision = precision_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0)
+                            online_aux_batch_recall = recall_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0)
+                            online_aux_batch_f1 = f1_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0)
 
                     online_metrics_dict = {
                         'online_class_accuracy': online_main_batch_accuracy,

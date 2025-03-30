@@ -31,7 +31,7 @@ class Buffer:
         self.final_labels = []
         self.cluster_labels = []
         self.main_labels = []
-
+        self.aux_labels = []
         self.label = label
         self.mode = mode
         self.lock = Lock()
@@ -65,6 +65,7 @@ class Buffer:
             aux_label = 1 if item['node_status'] == 'INFECTED' else 0
             item.pop('node_status', None)
             final_label = self.transform_to_sereway_class_label(class_label=self.label, attack_label=aux_label)
+            aux_label = torch.tensor(aux_label, dtype=torch.long)
             final_label = torch.tensor(final_label, dtype=torch.long)
 
         feat_tensor = dict_to_tensor(item)
@@ -87,22 +88,30 @@ class Buffer:
     def sample(self, n):
         
         feats = []
-        labels = []
+        final_labels = []
+        main_labels = []
+        aux_labels = []
         cluster_labels = []
 
         with self.lock:
             if len(self.feats) < n:
                 feats = self.feats
-                labels = self.final_labels
+                final_labels = self.final_labels
+                main_labels = self.main_labels
+                aux_labels = self.aux_labels
                 cluster_labels = self.cluster_labels
             else:
                 feats = random.sample(self.feats, n)
-                labels = random.sample(self.final_labels, n)
+                final_labels = random.sample(self.final_labels, n)
+                main_labels = random.sample(self.main_labels, n)
+                aux_labels = random.sample(self.aux_labels, n)
                 cluster_labels = random.sample(self.cluster_labels, n)
 
         if len(feats) > 0:
             feats = torch.stack(feats)
-            labels = torch.stack(labels).unsqueeze(-1)
+            final_labels = torch.stack(final_labels).unsqueeze(-1)
+            main_labels = torch.stack(main_labels).unsqueeze(-1)
+            aux_labels = torch.stack(aux_labels).unsqueeze(-1)
             cluster_labels = torch.stack(cluster_labels).unsqueeze(-1)
 
-        return feats, labels, cluster_labels
+        return feats, final_labels, main_labels, aux_labels, cluster_labels

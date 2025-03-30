@@ -35,10 +35,10 @@ class Brain:
             aux_stream_loss = 0
             final_head_loss = 0
 
-            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels)
+            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels.float())
 
             if self.mode == 'SW':
-                aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels)
+                aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels.float())
                 if final_pred.shape[0] > 1:   # SW batch of more elems
                     final_head_loss = self.final_head_loss_function(final_pred, final_labels.long().squeeze())
                 else:                       # SW batch of 1 elems

@@ -14,48 +14,47 @@ class MLP(nn.Module):
 
         main_stream = []
         aux_stream = []
-
+        final_stream = []
         # stream:
         if layer_norm:
             main_stream.append(nn.LayerNorm(input_dim))
             aux_stream.append(nn.LayerNorm(probe_len))
 
-        # layer iteration
+        
         curr_output_dim = h_dim
         curr_main_input_dim = input_dim
-        curr_aux_input_dim = probe_len
 
         for _ in range(num_layers):
-
             main_stream.append(nn.Linear(curr_main_input_dim, curr_output_dim))
-            aux_stream.append(nn.Linear(curr_aux_input_dim, curr_output_dim))
-
             main_stream.append(nn.ReLU())
-            aux_stream.append(nn.ReLU())
-
             main_stream.append(nn.Dropout(dropout))
-            aux_stream.append(nn.Dropout(dropout))
-
-            curr_aux_input_dim = curr_output_dim
             curr_main_input_dim = curr_output_dim
-
             curr_output_dim = curr_output_dim // 2
-
-        # pre-heads:
         main_stream.append(nn.Linear(curr_main_input_dim, 1))
         main_stream.append(nn.Sigmoid())
-
-        aux_stream.append(nn.Linear(curr_aux_input_dim, 1))
-        aux_stream.append(nn.Sigmoid())
-
-        # final-head:
-        final_head_1 = nn.Linear(curr_main_input_dim + curr_aux_input_dim, curr_output_dim)
-        final_head_2 = nn.Linear(curr_output_dim, output_dim)
-        final_head_3 = nn.Softmax(dim=1)
-
         self.main_stream = nn.Sequential(*main_stream)
-        self.aux_stream = nn.Sequential(*aux_stream)
-        self.final_head = nn.Sequential(final_head_1, final_head_2, final_head_3)
+
+        if mode == 'SW':
+            curr_output_dim = h_dim
+            curr_aux_input_dim = probe_len
+
+            for _ in range(num_layers):
+                aux_stream.append(nn.Linear(curr_aux_input_dim, curr_output_dim))
+                aux_stream.append(nn.ReLU())
+                aux_stream.append(nn.Dropout(dropout))
+                curr_aux_input_dim = curr_output_dim
+                curr_output_dim = curr_output_dim // 2
+            aux_stream.append(nn.Linear(curr_aux_input_dim, 1))
+            aux_stream.append(nn.Sigmoid())
+
+            final_stream.append(nn.Linear(curr_main_input_dim + curr_aux_input_dim, curr_output_dim))
+            final_stream.append(nn.ReLU())    
+            final_stream.append(nn.Dropout(dropout))
+            final_stream.append(nn.Linear(curr_output_dim, output_dim))
+            final_stream.append(nn.Softmax(dim=1))   
+        
+            self.aux_stream = nn.Sequential(*aux_stream)
+            self.final_stream = nn.Sequential(final_stream)
 
 
     def forward(self, x):
@@ -65,6 +64,6 @@ class MLP(nn.Module):
 
         if self.mode == 'SW':
             aux = self.aux_stream(x)
-            final = self.final_head(torch.cat((main, aux), dim=1))
+            final = self.final_stream(torch.cat((main, aux), dim=1))
         
         return final, main, aux

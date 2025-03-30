@@ -302,7 +302,7 @@ def train_model(**kwargs):
     while not stop_threads:
         batch_feats = None
         batch_labels = None
-        batch_preds = None
+        batch_final_preds = None
         do_train_step = False
         batch_loss = 0
 
@@ -321,20 +321,34 @@ def train_model(**kwargs):
 
         if do_train_step:
             batch_counter += 1
-            batch_preds, loss = brain.train_step(batch_feats, batch_labels)
+            batch_final_preds, batch_main_preds, batch_aux_preds, loss = brain.train_step(batch_feats, batch_labels)
 
-            # convert bath_preds to binary using pytorch:
-            if mode == 'OF':
-                batch_preds = (batch_preds > 0.5).float()
-            else:
-                batch_preds = torch.argmax(batch_preds, dim=1)
+            batch_main_preds = (batch_main_preds > 0.5).float()
+
+            # batch_main_accuracy = accuracy_score(batch_main_labels, batch_main_preds)
+            # batch_main_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            # batch_main_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            # batch_main_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+
+            if mode == 'SW':
+                batch_aux_preds = (batch_aux_preds > 0.5).float()
+                
+
+                # batch_aux_accuracy = accuracy_score(batch_aux_labels, batch_aux_preds)
+                # batch_aux_precision = precision_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                # batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                # batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+
+                batch_final_preds = torch.argmax(batch_final_preds, dim=1)
+
+                batch_final_accuracy = accuracy_score(batch_labels, batch_final_preds)
+                batch_final_precision = precision_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
+                batch_final_recall = recall_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
+                batch_final_f1 = f1_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
+
 
             batch_loss += loss
-            batch_accuracy = accuracy_score(batch_labels, batch_preds)
-            batch_precision = precision_score(batch_labels, batch_preds, zero_division=0, average=average_param)
-            batch_recall = recall_score(batch_labels, batch_preds, zero_division=0, average=average_param)
-            batch_f1 = f1_score(batch_labels, batch_preds, zero_division=0, average=average_param)
-
+            
             if len(diagnostics_clusters) > 0:
                 batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
                 diagnostics_clusters_count += batch_diag_clusters
@@ -346,10 +360,10 @@ def train_model(**kwargs):
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
 
             epoch_loss += batch_loss
-            epoch_accuracy += batch_accuracy
-            epoch_precision += batch_precision
-            epoch_recall += batch_recall
-            epoch_f1 += batch_f1
+            epoch_accuracy += batch_final_accuracy
+            epoch_precision += batch_final_precision
+            epoch_recall += batch_final_recall
+            epoch_f1 += batch_final_f1
 
             if batch_counter % epoch_size == 0:
                 
@@ -497,7 +511,7 @@ def main():
 
     mode = args.mode
     if mode == 'SW':
-        args.input_dim = args.input_dim + len(args.probe_metrics)
+        # args.input_dim = args.input_dim + len(args.probe_metrics)
         args.output_dim = 4
         average_param = 'macro'
 

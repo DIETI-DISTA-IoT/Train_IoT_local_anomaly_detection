@@ -5,10 +5,20 @@ import numpy as np
 def dict_to_tensor(data_dict):
     
     uncampled_values = [ (value  if isinstance(value, (int, float)) and not np.isnan(value) else 0.0) for value in data_dict.values() ]
-    # clampled_values = [ max(min(value, 30000), -4000) for value in uncampled_values ]
-    clampled_values = [ max(min(value, 3000000), -4000) for value in uncampled_values ]
-    # Convert the list of values to a PyTorch tensor
+
+    ## ALTERNATIVE 1: convert to numpy clamping the inf values:
+    uncampled_values = np.array(uncampled_values, dtype=np.float32)
+    clampled_values = np.clip(uncampled_values, a_min=-1e6, a_max=1e6)
     tensor = torch.tensor(clampled_values, dtype=torch.float32)
+
+    ## ALTERNATIVE 2: convert to list clamping the inf values:
+    # clampled_values = [ max(min(value, 30000), -4000) for value in uncampled_values ]
+    # tensor = torch.tensor(clampled_values, dtype=torch.float32)
+
+    ## ALTERNATIVE 3: convert to list clamping the inf values:
+    # tensor = torch.tensor(uncampled_values, dtype=torch.float32)
+    # tensor = torch.nan_to_num(tensor, posinf=1e6, neginf=-1e6)
+
     return tensor
 
 

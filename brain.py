@@ -12,10 +12,11 @@ class Brain:
         optim_class_name = kwargs.get('optimizer', 'Adam')
         self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
         self.mode = kwargs.get('mode', 'OF')
-        if self.mode == 'OF':
-            self.loss_function = nn.BCELoss()
-        else:
-            self.loss_function = nn.CrossEntropyLoss()
+
+       
+        self.main_stream_loss_function = nn.BCELoss()
+        self.aux_stream_loss_function = nn.BCELoss()
+        self.final_head_loss_function = nn.CrossEntropyLoss()
 
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
@@ -23,20 +24,32 @@ class Brain:
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
 
 
-    def train_step(self, x, y):
+    def train_step(self, feats, final_labels, main_labels, aux_labels):
+
         with self.model_lock:
             self.model.train()
             self.optimizer.zero_grad()
-            y_pred = self.model(x)
-            if self.mode == 'OF':
-                loss = self.loss_function(y_pred, y)
-            elif y_pred.shape[0] > 1:   # SW batch of 1 elem
-                loss = self.loss_function(y_pred, y.long().squeeze())
-            else:                       # SW batch of more elems
-                loss = self.loss_function(y_pred.squeeze(), y.long().squeeze())           
+            final_pred, main_pred, aux_pred = self.model(feats)
+
+            main_stream_loss = 0
+            aux_stream_loss = 0
+            final_head_loss = 0
+
+            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels.float())
+
+            if self.mode == 'SW':
+                aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels.float())
+                if final_pred.shape[0] > 1:   # SW batch of more elems
+                    final_head_loss = self.final_head_loss_function(final_pred, final_labels.long().squeeze())
+                else:                       # SW batch of 1 elems
+                    final_head_loss = self.final_head_loss_function(final_pred.squeeze(), final_labels.long().squeeze())
+
+
+            loss = main_stream_loss + aux_stream_loss + final_head_loss
             loss.backward()
             self.optimizer.step()
-            return y_pred.detach(), loss.item()
+
+            return final_pred.detach(), main_pred.detach(), aux_pred.detach(), loss.item()
     
 
     def get_brain_state_copy(self):

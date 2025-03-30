@@ -27,58 +27,50 @@ def dict_to_tensor(data_dict):
 class Buffer:
     def __init__(self, size, label=None, mode=None):
         self.size = size
-        """
-        self.buffer = []
-        """
         self.feats = []
-        self.labels = []
+        self.final_labels = []
         self.cluster_labels = []
-
+        self.main_labels = []
+        self.aux_labels = []
         self.label = label
         self.mode = mode
         self.lock = Lock()
 
 
-    """
-    def add(self, item):
-        self.buffer.append(item)
-        if len(self.buffer) > self.size:
-            self.buffer.pop(0)
-    """
-
-
-    def add(self, feat_tensor, label_tensor, cluster_label_tensor):
+    def add(self, feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor):
             
             with self.lock:
                 self.feats.append(feat_tensor)
-                self.labels.append(label_tensor)
+                self.final_labels.append(final_label_tensor)
+                self.main_labels.append(main_label_tensor)
+                self.aux_labels.append(aux_label_tensor)
                 self.cluster_labels.append(cluster_label_tensor)
                 if len(self.feats) > self.size:
                     self.feats.pop(0)
-                    self.labels.pop(0)
+                    self.final_labels.pop(0)
+                    self.main_labels.pop(0)
+                    self.aux_labels.pop(0)
                     self.cluster_labels.pop(0)
 
 
     def format(self, item):
 
-        cluster_label = int(item['cluster'])
-        class_label = torch.tensor(self.label, dtype=torch.long)
+        final_label = None
+
+        cluster_label = int(item.pop('cluster', None))
+        cluster_label = torch.tensor(cluster_label, dtype=torch.long)
+        main_label = torch.tensor(self.label, dtype=torch.long)
 
         if self.mode == 'SW':
-            attack_label = 1 if item['node_status'] == 'INFECTED' else 0
-            sereway_label = self.transform_to_sereway_class_label(class_label=self.label, attack_label=attack_label)
-            sereway_label = torch.tensor(sereway_label, dtype=torch.long)
+            aux_label = 1 if item['node_status'] == 'INFECTED' else 0
             item.pop('node_status', None)
-        
-        item.pop('cluster', None)
+            final_label = self.transform_to_sereway_class_label(class_label=self.label, attack_label=aux_label)
+            aux_label = torch.tensor(aux_label, dtype=torch.long)
+            final_label = torch.tensor(final_label, dtype=torch.long)
 
         feat_tensor = dict_to_tensor(item)
-        cluster_label = torch.tensor(cluster_label, dtype=torch.long)
-
-        if self.mode == 'SW':
-            return feat_tensor, sereway_label, cluster_label
-        else:
-            return feat_tensor, class_label, cluster_label
+        
+        return feat_tensor, final_label, main_label, aux_label, cluster_label
 
 
     def transform_to_sereway_class_label(self, class_label, attack_label):
@@ -91,66 +83,35 @@ class Buffer:
         """
         sereway_label = (2*class_label) + attack_label
         return sereway_label
-
-    """
-    def sample(self, n):
-        if len(self.buffer) < n:
-            record_list = self.buffer
-        else:
-            record_list = random.sample(self.buffer, n)
-
-        feature_tensors = []
-        cluster_labels = []
-        class_labels = []
-        sereway_labels = []
-
-        for record in record_list:
-            cluster_label = int(record['cluster'])
-            record_copy = record.copy()
-
-            if self.mode == 'SW':
-                attack_label = 1 if record['node_status'] == 'INFECTED' else 0
-                sereway_label = self.transform_to_sereway_class_label(class_label=self.label, attack_label=attack_label)
-                sereway_labels.append(sereway_label)
-                record_copy.pop('node_status', None)
-            
-            record_copy.pop('cluster', None)
-            feature_tensors.append(dict_to_tensor(record_copy))
-            cluster_labels.append(cluster_label)
-        
-        if len(record_list) > 0:
-            feature_tensors = torch.stack(feature_tensors)
-            cluster_labels = torch.tensor(cluster_labels).unsqueeze(1)
-            
-            if self.mode == 'SW':
-                class_labels = torch.tensor(sereway_labels).to(torch.float32)
-            else:
-                class_labels = torch.tensor([[self.label]] * len(feature_tensors)).to(torch.float32)
-
-
-
-        return feature_tensors, class_labels, cluster_labels"
-    """
+    
 
     def sample(self, n):
         
         feats = []
-        labels = []
+        final_labels = []
+        main_labels = []
+        aux_labels = []
         cluster_labels = []
 
         with self.lock:
             if len(self.feats) < n:
                 feats = self.feats
-                labels = self.labels
+                final_labels = self.final_labels
+                main_labels = self.main_labels
+                aux_labels = self.aux_labels
                 cluster_labels = self.cluster_labels
             else:
                 feats = random.sample(self.feats, n)
-                labels = random.sample(self.labels, n)
+                final_labels = random.sample(self.final_labels, n)
+                main_labels = random.sample(self.main_labels, n)
+                aux_labels = random.sample(self.aux_labels, n)
                 cluster_labels = random.sample(self.cluster_labels, n)
 
         if len(feats) > 0:
             feats = torch.stack(feats)
-            labels = torch.stack(labels).unsqueeze(-1)
+            final_labels = torch.stack(final_labels).unsqueeze(-1)
+            main_labels = torch.stack(main_labels).unsqueeze(-1)
+            aux_labels = torch.stack(aux_labels).unsqueeze(-1)
             cluster_labels = torch.stack(cluster_labels).unsqueeze(-1)
 
-        return feats, labels, cluster_labels
+        return feats, final_labels, main_labels, aux_labels, cluster_labels

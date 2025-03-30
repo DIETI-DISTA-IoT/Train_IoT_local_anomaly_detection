@@ -30,14 +30,33 @@ diagnostics_clusters_count = torch.zeros(15)
 anomalies_clusters_count = torch.zeros(19)
 diagnostics_cluster_percentages =torch.zeros(15)
 anomalies_cluster_percentages = torch.zeros(19)
+
 epoch_loss = 0
-epoch_accuracy = 0
-epoch_precision = 0
-epoch_recall = 0
-epoch_f1 = 0
+
+epoch_final_accuracy = 0
+epoch_final_precision = 0
+epoch_final_recall = 0
+epoch_final_f1 = 0
+
+epoch_main_accuracy= 0
+epoch_main_precision= 0
+epoch_main_recall= 0
+epoch_main_f1= 0
+
+epoch_aux_accuracy= 0
+epoch_aux_precision= 0
+epoch_aux_recall= 0
+epoch_aux_f1= 0
+
 average_param = 'binary'
-online_batch_labels = []
-online_batch_preds = []
+
+online_final_batch_labels = []
+online_final_batch_preds = []
+online_main_batch_labels = []
+online_main_batch_preds = []
+online_aux_batch_labels = []
+online_aux_batch_preds = []
+
 mitigation_times = []
 mitigation_reward = 0
 
@@ -122,20 +141,20 @@ def process_message(topic, msg):
     # logger.debug(f"Processing message from topic [{topic}]")
 
     if topic.endswith("_anomalies"):
-        feat_tensor, label_tensor, cluster_label_tensor = anomalies_buffer.format(msg)
-        anomalies_buffer.add(feat_tensor, label_tensor, cluster_label_tensor)
+        feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor = anomalies_buffer.format(msg)
+        anomalies_buffer.add(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor)
         received_anomalies_msg += 1
         anomalies_processed += 1
         counting_message = True
     elif topic.endswith("_normal_data"):
-        feat_tensor, label_tensor, cluster_label_tensor = diagnostics_buffer.format(msg)
-        diagnostics_buffer.add(feat_tensor, label_tensor, cluster_label_tensor)
+        feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor = diagnostics_buffer.format(msg)
+        diagnostics_buffer.add(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor)
         received_normal_msg += 1
         diagnostics_processed += 1
         counting_message = True
     if counting_message:
         received_all_real_msg += 1
-        online_classification(feat_tensor, label_tensor)
+        online_classification(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor)
 
     if received_all_real_msg % 500 == 0:
         logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
@@ -143,8 +162,8 @@ def process_message(topic, msg):
 
 def mitigation_and_rewarding(prediction, current_label):
     global mitigation_reward
-    if prediction == 1 or prediction == 3:
-        if current_label == 1 or current_label == 3:
+    if prediction == 1:
+        if current_label == prediction:
             # True positive.
             if MITIGATION: send_attack_mitigation_request(VEHICLE_NAME)
             mitigation_reward += true_positive_reward
@@ -152,7 +171,7 @@ def mitigation_and_rewarding(prediction, current_label):
             # False positive
             mitigation_reward += false_positive_reward
     else:
-        if current_label == 0 or current_label == 2:
+        if current_label == prediction:
             # True negative
             mitigation_reward += true_negative_reward
         else:
@@ -160,24 +179,35 @@ def mitigation_and_rewarding(prediction, current_label):
             mitigation_reward += false_negative_reward
 
 
-def online_classification(feat_tensor, label_tensor):
-    global online_batch_labels, online_batch_preds, mitigation_reward
+def online_classification(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor):
+    global online_final_batch_labels, online_final_batch_preds, mitigation_reward
+    global online_main_batch_labels, online_main_batch_preds, online_aux_batch_labels, online_aux_batch_preds
     global lists_lock
 
     brain.model.eval()
     with brain.model_lock, torch.no_grad():
         
-        y_pred = brain.model(feat_tensor.unsqueeze(0))
-        if mode == 'OF':
-            y_pred = (y_pred > 0.5).float()
-        else:
-            y_pred = y_pred.argmax(dim=1)
+        final_pred, main_pred, aux_pred = brain.model(feat_tensor.unsqueeze(0))
+
+        main_pred = (main_pred > 0.5).float()
+        if mode == 'SW':
+            aux_pred = (aux_pred > 0.5).float()
+            final_pred = final_pred.argmax(dim=1)
 
     # acquire lists lock
     with lists_lock:
-        online_batch_labels.append(label_tensor.float())
-        online_batch_preds.append(y_pred)
-    if mode == 'SW': mitigation_and_rewarding(y_pred, label_tensor)        
+
+        online_main_batch_labels.append(main_label_tensor.float())
+        online_main_batch_preds.append(main_pred)
+
+        if mode == 'SW':
+            online_aux_batch_labels.append(aux_label_tensor.float())
+            online_aux_batch_preds.append(aux_pred)
+
+            online_final_batch_labels.append(final_label_tensor.float())
+            online_final_batch_preds.append(final_pred)
+
+    if mode == 'SW': mitigation_and_rewarding(aux_pred, aux_label_tensor)        
 
 
 def subscribe_to_topics():
@@ -275,8 +305,11 @@ def pull_weights(**kwargs):
 def train_model(**kwargs):
     global brain, diagnostics_processed, anomalies_processed, batch_counter, epoch_counter
     global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
-    global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
-    global online_batch_labels, online_batch_preds, mitigation_reward, mitigation_times
+    global epoch_loss, epoch_final_accuracy, epoch_final_precision, epoch_final_recall, epoch_final_f1
+    global epoch_main_accuracy, epoch_main_precision, epoch_main_recall, epoch_main_f1
+    global epoch_aux_accuracy, epoch_aux_precision, epoch_aux_recall, epoch_aux_f1
+    global online_final_batch_labels, online_final_batch_preds, mitigation_reward, mitigation_times
+    global online_main_batch_labels, online_main_batch_preds, online_aux_batch_labels, online_aux_batch_preds
     global lists_lock
     
     lists_lock = Lock()
@@ -287,52 +320,54 @@ def train_model(**kwargs):
 
     while not stop_threads:
         batch_feats = None
-        batch_labels = None
+        batch_final_labels = None
         batch_final_preds = None
         do_train_step = False
         batch_loss = 0
 
-        diagnostics_feats, diagnostics_labels, diagnostics_clusters = diagnostics_buffer.sample(batch_size)
-        anomalies_feats, anomalies_labels, anomalies_clusters = anomalies_buffer.sample(batch_size)
+        diagnostics_feats, diag_final_labels, diag_main_labels, diag_aux_labels, diagnostics_clusters = diagnostics_buffer.sample(batch_size)
+        anomalies_feats, anom_final_labels, anom_main_labels, anom_aux_labels, anomalies_clusters = anomalies_buffer.sample(batch_size)
 
         if len(diagnostics_feats) > 0:
             batch_feats = diagnostics_feats
             do_train_step = True
-            batch_labels = diagnostics_labels
+            batch_final_labels = diag_final_labels
+            batch_main_labels = diag_main_labels
+            batch_aux_labels = diag_aux_labels
 
         if len(anomalies_feats) > 0:
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
-            batch_labels = (anomalies_labels if batch_labels is None else torch.vstack((batch_labels, anomalies_labels)))
-            if mode == 'SW':
-                batch_labels = batch_labels.flatten()
+            batch_final_labels = (anom_final_labels if batch_final_labels is None else torch.vstack((batch_final_labels, anom_final_labels)))
+            batch_main_labels = (anom_main_labels if batch_main_labels is None else torch.vstack((batch_main_labels, anom_main_labels)))
+            batch_aux_labels = (anom_aux_labels if batch_aux_labels is None else torch.vstack((batch_aux_labels, anom_aux_labels)))
 
         if do_train_step:
             batch_counter += 1
-            batch_final_preds, batch_main_preds, batch_aux_preds, loss = brain.train_step(batch_feats, batch_labels)
+            batch_final_preds, batch_main_preds, batch_aux_preds, loss = brain.train_step(batch_feats, batch_final_labels, batch_main_labels, batch_aux_labels)
 
             batch_main_preds = (batch_main_preds > 0.5).float()
 
-            # batch_main_accuracy = accuracy_score(batch_main_labels, batch_main_preds)
-            # batch_main_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
-            # batch_main_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
-            # batch_main_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            batch_main_accuracy = accuracy_score(batch_main_labels, batch_main_preds)
+            batch_main_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            batch_main_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
+            batch_main_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average=average_param)
 
             if mode == 'SW':
                 batch_aux_preds = (batch_aux_preds > 0.5).float()
                 
 
-                # batch_aux_accuracy = accuracy_score(batch_aux_labels, batch_aux_preds)
-                # batch_aux_precision = precision_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
-                # batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
-                # batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                batch_aux_accuracy = accuracy_score(batch_aux_labels, batch_aux_preds)
+                batch_aux_precision = precision_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
+                batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0, average=average_param)
 
                 batch_final_preds = torch.argmax(batch_final_preds, dim=1)
 
-                batch_final_accuracy = accuracy_score(batch_labels, batch_final_preds)
-                batch_final_precision = precision_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
-                batch_final_recall = recall_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
-                batch_final_f1 = f1_score(batch_labels, batch_final_preds, zero_division=0, average=average_param)
+                batch_final_accuracy = accuracy_score(batch_final_labels, batch_final_preds)
+                batch_final_precision = precision_score(batch_final_labels, batch_final_preds, zero_division=0, average=average_param)
+                batch_final_recall = recall_score(batch_final_labels, batch_final_preds, zero_division=0, average=average_param)
+                batch_final_f1 = f1_score(batch_final_labels, batch_final_preds, zero_division=0, average=average_param)
 
 
             batch_loss += loss
@@ -348,62 +383,127 @@ def train_model(**kwargs):
                 anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
 
             epoch_loss += batch_loss
-            epoch_accuracy += batch_final_accuracy
-            epoch_precision += batch_final_precision
-            epoch_recall += batch_final_recall
-            epoch_f1 += batch_final_f1
+
+            epoch_main_accuracy += batch_main_accuracy
+            epoch_main_precision += batch_main_precision
+            epoch_main_recall += batch_main_recall
+            epoch_main_f1 += batch_main_f1
+
+            if mode == 'SW':
+                epoch_aux_accuracy += batch_aux_accuracy
+                epoch_aux_precision += batch_aux_precision
+                epoch_aux_recall += batch_aux_recall
+                epoch_aux_f1 += batch_aux_f1
+
+                epoch_final_accuracy += batch_final_accuracy
+                epoch_final_precision += batch_final_precision
+                epoch_final_recall += batch_final_recall
+                epoch_final_f1 += batch_final_f1
 
             if batch_counter % epoch_size == 0:
                 
                 epoch_counter += 1
 
                 epoch_loss /= epoch_size
-                epoch_accuracy /= epoch_size
-                epoch_precision /= epoch_size
-                epoch_recall /= epoch_size
-                epoch_f1 /= epoch_size
+
+                epoch_main_accuracy /= epoch_size
+                epoch_main_precision /= epoch_size
+                epoch_main_recall /= epoch_size
+                epoch_main_f1 /= epoch_size
+
+                if mode == 'SW':
+                    epoch_aux_accuracy /= epoch_size
+                    epoch_aux_precision /= epoch_size
+                    epoch_aux_recall /= epoch_size
+                    epoch_aux_f1 /= epoch_size
+
+                    epoch_final_accuracy /= epoch_size
+                    epoch_final_precision /= epoch_size
+                    epoch_final_recall /= epoch_size
+                    epoch_final_f1 /= epoch_size
 
                 metrics_dict = {
                     'total_loss': epoch_loss,
-                    'accuracy': epoch_accuracy,
-                    'precision': epoch_precision,
-                    'recall': epoch_recall,
-                    'f1': epoch_f1,
+                    'class_accuracy': epoch_main_accuracy,
+                    'class_precision': epoch_main_precision,
+                    'class_recall': epoch_main_recall,
+                    'class_f1': epoch_main_f1,
                     'diagnostics_processed': diagnostics_processed,
                     'anomalies_processed': anomalies_processed,
                     'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
                     'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
                 }
+
+                if mode == 'SW':
+                    metrics_dict['attack_accuracy'] = epoch_aux_accuracy
+                    metrics_dict['attack_precision'] = epoch_aux_precision
+                    metrics_dict['attack_recall'] = epoch_aux_recall
+                    metrics_dict['attack_f1'] = epoch_aux_f1
+
+                    metrics_dict['accuracy'] = epoch_final_accuracy
+                    metrics_dict['precision'] = epoch_final_precision
+                    metrics_dict['recall'] = epoch_final_recall
+                    metrics_dict['f1'] = epoch_final_f1
                 
-                if len(online_batch_labels) > 0:
+                if len(online_main_batch_labels) > 0:
                     with lists_lock:
-                        online_batch_accuracy = accuracy_score(online_batch_labels, online_batch_preds)
-                        online_batch_precision = precision_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                        online_batch_recall = recall_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
-                        online_batch_f1 = f1_score(online_batch_labels, online_batch_preds, zero_division=0, average=average_param)
+                        online_main_batch_accuracy = accuracy_score(online_main_batch_labels, online_main_batch_preds)
+                        online_main_batch_precision = precision_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
+                        online_main_batch_recall = recall_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
+                        online_main_batch_f1 = f1_score(online_main_batch_labels, online_main_batch_preds, zero_division=0, average=average_param)
+
+                        if mode == 'SW':
+                            online_final_batch_accuracy = accuracy_score(online_final_batch_labels, online_final_batch_preds)
+                            online_final_batch_precision = precision_score(online_final_batch_labels, online_final_batch_preds, zero_division=0, average=average_param)
+                            online_final_batch_recall = recall_score(online_final_batch_labels, online_final_batch_preds, zero_division=0, average=average_param)
+                            online_final_batch_f1 = f1_score(online_final_batch_labels, online_final_batch_preds, zero_division=0, average=average_param)
+
+
+                            online_aux_batch_accuracy = accuracy_score(online_aux_batch_labels, online_aux_batch_preds)
+                            online_aux_batch_precision = precision_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
+                            online_aux_batch_recall = recall_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
+                            online_aux_batch_f1 = f1_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0, average=average_param)
 
                     online_metrics_dict = {
-                        'online_accuracy': online_batch_accuracy,
-                        'online_precision': online_batch_precision,
-                        'online_recall': online_batch_recall,
-                        'online_f1': online_batch_f1
+                        'online_class_accuracy': online_main_batch_accuracy,
+                        'online_class_precision': online_main_batch_precision,
+                        'online_class_recall': online_main_batch_recall,
+                        'online_class_f1': online_main_batch_f1
                         }
+                    
+                    if mode == 'SW':
+                        online_metrics_dict.update({
+                            'online_accuracy': online_final_batch_accuracy,
+                            'online_precision': online_final_batch_precision,
+                            'online_recall': online_final_batch_recall,
+                            'online_f1': online_final_batch_f1,
+                            'online_attack_accuracy': online_aux_batch_accuracy,
+                            'online_attack_precision': online_aux_batch_precision,
+                            'online_attack_recall': online_aux_batch_recall,
+                            'online_attack_f1': online_aux_batch_f1
+                            })
 
-                    if mode == 'SW': 
                         online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
                         online_metrics_dict['mitigation_reward'] = mitigation_reward
 
                     metrics_dict.update(online_metrics_dict)
                     with lists_lock:
-                        online_batch_labels = []
-                        online_batch_preds = []
+                        online_final_batch_labels = []
+                        online_final_batch_preds = []
+                        online_main_batch_labels = []
+                        online_main_batch_preds = []
+                        online_aux_batch_labels = []
+                        online_aux_batch_preds = []
                         mitigation_times = []
                     mitigation_reward = 0
 
 
                 metrics_reporter.report(metrics_dict)
                 
-                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                epoch_loss = epoch_final_accuracy = epoch_final_precision = epoch_final_recall = epoch_final_f1 = 0
+                epoch_main_accuracy = epoch_main_precision = epoch_main_recall = epoch_main_f1 = 0
+                epoch_aux_accuracy = epoch_aux_precision = epoch_aux_recall = epoch_aux_f1 = 0
+
                 diagnostics_clusters_count = torch.zeros(15)
                 anomalies_clusters_count = torch.zeros(19)
                     

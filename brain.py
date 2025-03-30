@@ -24,24 +24,25 @@ class Brain:
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
 
 
-    def train_step(self, x, y):
+    def train_step(self, feats, final_labels, main_labels, aux_labels):
+
         with self.model_lock:
             self.model.train()
             self.optimizer.zero_grad()
-            final_pred, main_pred, aux_pred = self.model(x)
+            final_pred, main_pred, aux_pred = self.model(feats)
 
             main_stream_loss = 0
             aux_stream_loss = 0
             final_head_loss = 0
 
-            main_stream_loss = self.main_stream_loss_function(main_pred, y)
+            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels)
 
             if self.mode == 'SW':
-                aux_stream_loss = self.aux_stream_loss_function(aux_pred, y)
+                aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels)
                 if final_pred.shape[0] > 1:   # SW batch of more elems
-                    final_head_loss = self.final_head_loss_function(final_pred, y.long().squeeze())
+                    final_head_loss = self.final_head_loss_function(final_pred, final_labels.long().squeeze())
                 else:                       # SW batch of 1 elems
-                    final_head_loss = self.final_head_loss_function(final_pred.squeeze(), y.long().squeeze())
+                    final_head_loss = self.final_head_loss_function(final_pred.squeeze(), final_labels.long().squeeze())
 
 
             loss = main_stream_loss + aux_stream_loss + final_head_loss

@@ -192,7 +192,12 @@ def online_classification(feat_tensor, final_label_tensor, main_label_tensor, au
         main_pred = (main_pred > 0.5).float()
         if mode == 'SW':
             aux_pred = (aux_pred > 0.5).float()
-            final_pred = final_pred.argmax(dim=1)
+
+            # final_pred = final_pred.argmax(dim=1)
+
+            # approximate final_pred to the closest integer:
+            final_pred = torch.round(final_pred)
+
 
     # acquire lists lock
     with lists_lock:

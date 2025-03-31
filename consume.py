@@ -371,7 +371,7 @@ def train_model(**kwargs):
                 batch_aux_recall = recall_score(batch_aux_labels, batch_aux_preds, zero_division=0)
                 batch_aux_f1 = f1_score(batch_aux_labels, batch_aux_preds, zero_division=0)
 
-                batch_final_preds = torch.argmax(batch_final_preds, dim=1)
+                # batch_final_preds = torch.argmax(batch_final_preds, dim=1)
 
                 batch_final_accuracy = accuracy_score(batch_final_labels, batch_final_preds)
                 batch_final_precision = precision_score(batch_final_labels, batch_final_preds, zero_division=0, average=average_param)

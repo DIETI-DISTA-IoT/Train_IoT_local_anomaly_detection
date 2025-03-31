@@ -586,10 +586,10 @@ def main():
     parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
     parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
     parser.add_argument('--mitigation', action="store_true", help='Perform mitigation since SM launching or attend explicit command')
-    parser.add_argument('--true_positive_reward', type=float, default=1.0, help='Reward for a true positive prediction')
-    parser.add_argument('--true_negative_reward', type=float, default=-0.4, help='Reward for a true negative prediction')
+    parser.add_argument('--true_positive_reward', type=float, default=2.0, help='Reward for a true positive prediction')
+    parser.add_argument('--true_negative_reward', type=float, default=0, help='Reward for a true negative prediction')
     parser.add_argument('--false_positive_reward', type=float, default=-4, help='Reward for a false positive prediction')
-    parser.add_argument('--false_negative_reward', type=float, default=-8, help='Reward for a false negative prediction')
+    parser.add_argument('--false_negative_reward', type=float, default=-10, help='Reward for a false negative prediction')
     parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
     parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
 

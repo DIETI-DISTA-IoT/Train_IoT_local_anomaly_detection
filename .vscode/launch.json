@@ -18,6 +18,7 @@
                     "--batch_size=4",
                     "--mitigation",
                     "--no_proxy_host",
+                    "--layer_norm",
                     "--logging_level=debug"]   
         }
     ]

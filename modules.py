@@ -11,11 +11,10 @@ class MLP(nn.Module):
         layer_norm = kwargs.get('layer_norm', False)
         self.mode = kwargs.get('mode')
         self.aux_stream_input_dim = len(kwargs.get('probe_metrics'))
-        
 
         main_stream = []
         aux_stream = []
-        final_stream = []
+
         # stream:
         if layer_norm:
             main_stream.append(nn.LayerNorm(input_dim))
@@ -48,13 +47,7 @@ class MLP(nn.Module):
             aux_stream.append(nn.Linear(curr_aux_input_dim, 1))
             aux_stream.append(nn.Sigmoid())
 
-            final_stream.append(nn.Linear(2, curr_output_dim))
-            final_stream.append(nn.ReLU())    
-            final_stream.append(nn.Linear(curr_output_dim, output_dim))
-            final_stream.append(nn.Softmax(dim=1))   
-        
             self.aux_stream = nn.Sequential(*aux_stream)
-            self.final_stream = nn.Sequential(*final_stream)
 
 
     def forward(self, x):
@@ -65,6 +58,6 @@ class MLP(nn.Module):
         else:
             main = self.main_stream(x[:, :-self.aux_stream_input_dim])
             aux = self.aux_stream(x[:, -self.aux_stream_input_dim:])
-            final = self.final_stream(torch.cat((main, aux), dim=1))
+            final = (2 * main) + aux
         
         return final, main, aux

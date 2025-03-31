@@ -449,7 +449,7 @@ def train_model(**kwargs):
                     metrics_dict['recall'] = epoch_final_recall
                     metrics_dict['f1'] = epoch_final_f1
                 
-                if len(online_main_batch_labels) > 0:
+                if len(online_main_batch_labels) > 20:
                     with lists_lock:
                         online_main_batch_accuracy = accuracy_score(online_main_batch_labels, online_main_batch_preds)
                         online_main_batch_precision = precision_score(online_main_batch_labels, online_main_batch_preds, zero_division=0)
@@ -468,30 +468,30 @@ def train_model(**kwargs):
                             online_aux_batch_recall = recall_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0)
                             online_aux_batch_f1 = f1_score(online_aux_batch_labels, online_aux_batch_preds, zero_division=0)
 
-                    online_metrics_dict = {
-                        'online_class_accuracy': online_main_batch_accuracy,
-                        'online_class_precision': online_main_batch_precision,
-                        'online_class_recall': online_main_batch_recall,
-                        'online_class_f1': online_main_batch_f1
-                        }
-                    
-                    if mode == 'SW':
-                        online_metrics_dict.update({
-                            'online_accuracy': online_final_batch_accuracy,
-                            'online_precision': online_final_batch_precision,
-                            'online_recall': online_final_batch_recall,
-                            'online_f1': online_final_batch_f1,
-                            'online_attack_accuracy': online_aux_batch_accuracy,
-                            'online_attack_precision': online_aux_batch_precision,
-                            'online_attack_recall': online_aux_batch_recall,
-                            'online_attack_f1': online_aux_batch_f1
-                            })
+                        online_metrics_dict = {
+                            'online_class_accuracy': online_main_batch_accuracy,
+                            'online_class_precision': online_main_batch_precision,
+                            'online_class_recall': online_main_batch_recall,
+                            'online_class_f1': online_main_batch_f1
+                            }
+                        
+                        if mode == 'SW':
+                            online_metrics_dict.update({
+                                'online_accuracy': online_final_batch_accuracy,
+                                'online_precision': online_final_batch_precision,
+                                'online_recall': online_final_batch_recall,
+                                'online_f1': online_final_batch_f1,
+                                'online_attack_accuracy': online_aux_batch_accuracy,
+                                'online_attack_precision': online_aux_batch_precision,
+                                'online_attack_recall': online_aux_batch_recall,
+                                'online_attack_f1': online_aux_batch_f1
+                                })
 
-                        online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
-                        online_metrics_dict['mitigation_reward'] = mitigation_reward
+                            online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
+                            online_metrics_dict['mitigation_reward'] = mitigation_reward
 
-                    metrics_dict.update(online_metrics_dict)
-                    with lists_lock:
+                        metrics_dict.update(online_metrics_dict)
+
                         online_final_batch_labels = []
                         online_final_batch_preds = []
                         online_main_batch_labels = []
@@ -499,7 +499,7 @@ def train_model(**kwargs):
                         online_aux_batch_labels = []
                         online_aux_batch_preds = []
                         mitigation_times = []
-                    mitigation_reward = 0
+                        mitigation_reward = 0
 
 
                 metrics_reporter.report(metrics_dict)

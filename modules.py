@@ -66,6 +66,6 @@ class MLP(nn.Module):
             main = self.main_stream(x[:, :-self.aux_stream_input_dim])
             aux = self.aux_stream(x[:, -self.aux_stream_input_dim:])
             # final = self.final_stream(torch.cat((main, aux), dim=1))
-            final = 2*main + aux
+            # final = 2*main + aux
         
-        return final, main, aux
+        return main, aux

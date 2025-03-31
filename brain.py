@@ -25,7 +25,7 @@ class Brain:
         self.model.to(self.device)
         self.model_lock = Lock()
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
-
+        
 
     def train_step(self, feats, final_labels, main_labels, aux_labels):
 
@@ -33,7 +33,9 @@ class Brain:
             self.model.train()
             self.main_stream_optimizer.zero_grad()
             self.aux_stream_optimizer.zero_grad()
-            final_pred, main_pred, aux_pred = self.model(feats)
+            main_pred, aux_pred = self.model(feats)
+
+            final_pred = torch.round(2* main_pred.detach() + aux_pred.detach())
 
             main_stream_loss = 0
             aux_stream_loss = 0
@@ -55,7 +57,7 @@ class Brain:
             self.main_stream_optimizer.step()
             self.aux_stream_optimizer.step()
 
-            final_pred = torch.round(final_pred.detach())
+            
 
             return final_pred.detach(), main_pred.detach(), aux_pred.detach(), loss.item()
     

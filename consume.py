@@ -187,7 +187,7 @@ def online_classification(feat_tensor, final_label_tensor, main_label_tensor, au
     brain.model.eval()
     with brain.model_lock, torch.no_grad():
         
-        final_pred, main_pred, aux_pred = brain.model(feat_tensor.unsqueeze(0))
+        main_pred, aux_pred = brain.model(feat_tensor.unsqueeze(0))
 
         main_pred = (main_pred > 0.5).float()
         if mode == 'SW':
@@ -196,7 +196,7 @@ def online_classification(feat_tensor, final_label_tensor, main_label_tensor, au
             # final_pred = final_pred.argmax(dim=1)
 
             # approximate final_pred to the closest integer:
-            final_pred = torch.round(final_pred)
+            final_pred = torch.round(2*main_pred.detach() + aux_pred.detach())
 
 
     # acquire lists lock

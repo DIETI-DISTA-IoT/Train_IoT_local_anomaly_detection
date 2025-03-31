@@ -56,6 +56,7 @@ class Buffer:
     def format(self, item):
 
         final_label = None
+        aux_label = None
 
         cluster_label = int(item.pop('cluster', None))
         cluster_label = torch.tensor(cluster_label, dtype=torch.long)
@@ -109,9 +110,12 @@ class Buffer:
 
         if len(feats) > 0:
             feats = torch.stack(feats)
-            final_labels = torch.stack(final_labels).unsqueeze(-1)
             main_labels = torch.stack(main_labels).unsqueeze(-1)
-            aux_labels = torch.stack(aux_labels).unsqueeze(-1)
             cluster_labels = torch.stack(cluster_labels).unsqueeze(-1)
+
+            if self.mode == 'SW':
+                final_labels = torch.stack(final_labels).unsqueeze(-1)   
+                aux_labels = torch.stack(aux_labels).unsqueeze(-1)
+            
 
         return feats, final_labels, main_labels, aux_labels, cluster_labels

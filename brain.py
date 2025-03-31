@@ -10,16 +10,16 @@ class Brain:
     def __init__(self, **kwargs):
         self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer', 'Adam')
-        self.params_for_mainstream_optimiser = [param[1] for param in self.model.named_parameters() if 'main_stream' in param[0]]
-        self.params_for_auxstream_optimiser = [param[1] for param in self.model.named_parameters() if 'aux_stream' in param[0]]
-        self.main_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_mainstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
-        self.aux_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_auxstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
         self.mode = kwargs.get('mode', 'OF')
-
-       
+        self.params_for_mainstream_optimiser = [param[1] for param in self.model.named_parameters() if 'main_stream' in param[0]]
+        self.main_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_mainstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
         self.main_stream_loss_function = nn.BCELoss()
-        self.aux_stream_loss_function = nn.BCELoss()
-        self.final_head_loss_function = nn.CrossEntropyLoss()
+
+        if self.mode == 'SW':
+            self.params_for_auxstream_optimiser = [param[1] for param in self.model.named_parameters() if 'aux_stream' in param[0]]
+            self.aux_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_auxstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
+            self.aux_stream_loss_function = nn.BCELoss()
+        # self.final_head_loss_function = nn.CrossEntropyLoss()
 
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
@@ -28,38 +28,38 @@ class Brain:
         
 
     def train_step(self, feats, final_labels, main_labels, aux_labels):
+        
+        final_pred = None
 
         with self.model_lock:
             self.model.train()
             self.main_stream_optimizer.zero_grad()
-            self.aux_stream_optimizer.zero_grad()
+            if self.mode == 'SW':
+                self.aux_stream_optimizer.zero_grad()
+
             main_pred, aux_pred = self.model(feats)
 
-            final_pred = torch.round(2* main_pred.detach() + aux_pred.detach())
+            if self.mode == 'SW':
+                final_pred = torch.round(2* main_pred.detach() + aux_pred.detach())
 
             main_stream_loss = 0
             aux_stream_loss = 0
-            # final_head_loss = 0
 
             main_stream_loss = self.main_stream_loss_function(main_pred, main_labels.float())
 
             if self.mode == 'SW':
                 aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels.float())
-                """
-                if final_pred.shape[0] > 1:   # SW batch of more elems
-                    final_head_loss = self.final_head_loss_function(final_pred, final_labels.long().squeeze())
-                else:                       # SW batch of 1 elems
-                    final_head_loss = self.final_head_loss_function(final_pred.squeeze(), final_labels.long().squeeze())
-                """
             
-            loss = main_stream_loss + aux_stream_loss # + final_head_loss
+            loss = main_stream_loss + aux_stream_loss
             loss.backward()
             self.main_stream_optimizer.step()
-            self.aux_stream_optimizer.step()
+            main_pred = main_pred.detach()
 
-            
+            if self.mode == 'SW':
+                self.aux_stream_optimizer.step()
+                aux_pred = aux_pred.detach()
 
-            return final_pred.detach(), main_pred.detach(), aux_pred.detach(), loss.item()
+            return final_pred, main_pred, aux_pred, loss.item()
     
 
     def get_brain_state_copy(self):

@@ -340,16 +340,18 @@ def train_model(**kwargs):
         if len(diagnostics_feats) > 0:
             batch_feats = diagnostics_feats
             do_train_step = True
-            batch_final_labels = diag_final_labels
             batch_main_labels = diag_main_labels
-            batch_aux_labels = diag_aux_labels
+            if mode == 'SW':
+                batch_final_labels = diag_final_labels
+                batch_aux_labels = diag_aux_labels
 
         if len(anomalies_feats) > 0:
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
-            batch_final_labels = (anom_final_labels if batch_final_labels is None else torch.vstack((batch_final_labels, anom_final_labels)))
             batch_main_labels = (anom_main_labels if batch_main_labels is None else torch.vstack((batch_main_labels, anom_main_labels)))
-            batch_aux_labels = (anom_aux_labels if batch_aux_labels is None else torch.vstack((batch_aux_labels, anom_aux_labels)))
+            if mode == 'SW':
+                batch_final_labels = (anom_final_labels if batch_final_labels is None else torch.vstack((batch_final_labels, anom_final_labels)))
+                batch_aux_labels = (anom_aux_labels if batch_aux_labels is None else torch.vstack((batch_aux_labels, anom_aux_labels)))
 
         if do_train_step:
             batch_counter += 1

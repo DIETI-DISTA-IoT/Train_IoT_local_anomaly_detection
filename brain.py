@@ -8,25 +8,58 @@ from threading import Lock
 class Brain:
 
     def __init__(self, **kwargs):
-        self.model = MLP(kwargs.get('input_dim', 59), kwargs.get('output_dim', 1), **kwargs)
+        self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer', 'Adam')
-        self.optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
-        self.loss_function = nn.BCELoss()
+        self.mode = kwargs.get('mode', 'OF')
+        self.params_for_mainstream_optimiser = [param[1] for param in self.model.named_parameters() if 'main_stream' in param[0]]
+        self.main_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_mainstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
+        self.main_stream_loss_function = nn.BCELoss()
+
+        if self.mode == 'SW':
+            self.params_for_auxstream_optimiser = [param[1] for param in self.model.named_parameters() if 'aux_stream' in param[0]]
+            self.aux_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_auxstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
+            self.aux_stream_loss_function = nn.BCELoss()
+        # self.final_head_loss_function = nn.CrossEntropyLoss()
+
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
         self.model_lock = Lock()
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
+        
 
+    def train_step(self, feats, final_labels, main_labels, aux_labels):
+        
+        final_pred = None
 
-    def train_step(self, x, y):
         with self.model_lock:
             self.model.train()
-            self.optimizer.zero_grad()
-            y_pred = self.model(x)
-            loss = self.loss_function(y_pred, y)
+            self.main_stream_optimizer.zero_grad()
+            if self.mode == 'SW':
+                self.aux_stream_optimizer.zero_grad()
+
+            main_pred, aux_pred = self.model(feats)
+
+            if self.mode == 'SW':
+                final_pred = torch.round(2* main_pred.detach() + aux_pred.detach())
+
+            main_stream_loss = 0
+            aux_stream_loss = 0
+
+            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels.float())
+
+            if self.mode == 'SW':
+                aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels.float())
+            
+            loss = main_stream_loss + aux_stream_loss
             loss.backward()
-            self.optimizer.step()
-            return y_pred.detach(), loss.item()
+            self.main_stream_optimizer.step()
+            main_pred = main_pred.detach()
+
+            if self.mode == 'SW':
+                self.aux_stream_optimizer.step()
+                aux_pred = aux_pred.detach()
+
+            return final_pred, main_pred, aux_pred, loss.item()
     
 
     def get_brain_state_copy(self):
@@ -46,7 +79,8 @@ class Brain:
             current_state = self.model.state_dict()
             
             # Store references to the optimizer state
-            optimizer_state = self.optimizer.state_dict()
+            main_stream_optimizer_state = self.main_stream_optimizer.state_dict()
+            aux_stream_optimizer_state = self.aux_stream_optimizer.state_dict()
             
             # Load the new weights
             self.model.load_state_dict(new_weights)
@@ -56,9 +90,16 @@ class Brain:
                 param.data = param.data.to(self.device)
             
             # Recreate the optimizer with the new parameters
-            optim_class = self.optimizer.__class__
-            self.optimizer = optim_class(
-                self.model.parameters(),
-                **{key: value for key, value in optimizer_state['param_groups'][0].items()
+            main_stream_optim_class = self.main_stream_optimizer.__class__
+            self.main_stream_optimizer = main_stream_optim_class(
+                self.params_for_mainstream_optimiser,
+                **{key: value for key, value in main_stream_optimizer_state['param_groups'][0].items()
+                if key != 'params'}
+            )
+
+            aux_stream_optim_class = self.aux_stream_optimizer.__class__
+            self.aux_stream_optimizer = aux_stream_optim_class(
+                self.params_for_auxstream_optimiser,
+                **{key: value for key, value in aux_stream_optimizer_state['param_groups'][0].items()
                 if key != 'params'}
             )

@@ -17,6 +17,8 @@ import random
 import os
 import numpy as np
 from threading import Lock
+from flask import Flask, request, jsonify
+import yaml
 
 
 batch_counter = 0
@@ -384,14 +386,20 @@ def train_model(**kwargs):
             batch_loss += loss
             
             if len(diagnostics_clusters) > 0:
-                batch_diag_clusters = torch.bincount(diagnostics_clusters.squeeze(-1), minlength=15)
-                diagnostics_clusters_count += batch_diag_clusters
-                diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_clusters_count.sum()
+                labels = diagnostics_clusters.squeeze(-1)
+                labels = labels[labels >= 0].to(torch.long)
+                if labels.numel() > 0:
+                    batch_diag_clusters = torch.bincount(labels, minlength=15)
+                    diagnostics_clusters_count += batch_diag_clusters
+                    diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_clusters_count.sum()
                         
             if len(anomalies_clusters) > 0:
-                batch_anom_clusters = torch.bincount(anomalies_clusters.squeeze(-1), minlength=19)
-                anomalies_clusters_count += batch_anom_clusters
-                anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
+                labels = anomalies_clusters.squeeze(-1)
+                labels = labels[labels >= 0].to(torch.long)
+                if labels.numel() > 0:
+                    batch_anom_clusters = torch.bincount(labels, minlength=19)
+                    anomalies_clusters_count += batch_anom_clusters
+                    anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
 
             epoch_loss += batch_loss
 
@@ -555,47 +563,62 @@ def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
 
 
-def main():
-    """
-        Start the consumer for the specific vehicle.
-    """
+def build_args_from_config(config):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--kafka_broker', type=str, default='kafka:9092')
+    parser.add_argument('--buffer_size', type=int, default=10000)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--logging_level', type=str, default='INFO')
+    parser.add_argument('--weights_push_freq_seconds', type=int, default=300)
+    parser.add_argument('--weights_pull_freq_seconds', type=int, default=300)
+    parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--epoch_size', type=int, default=50)
+    parser.add_argument('--training_freq_seconds', type=float, default=1)
+    parser.add_argument('--save_model_freq_epochs', type=int, default=10)
+    parser.add_argument('--model_saving_path', type=str, default='default_model.pth')
+    parser.add_argument('--output_dim', type=int, default=1)
+    parser.add_argument('--h_dim', type=int, default=128)
+    parser.add_argument('--num_layers', type=int, default=3)
+    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--optimizer', type=str, default='Adam')
+    parser.add_argument('--layer_norm', action='store_true')
+    parser.add_argument('--input_dim', type=int, default=59)
+    parser.add_argument('--mode', type=str, default='OF')
+    parser.add_argument('--probe_metrics', type=parse_str_list, default=['RTT','INBOUND','OUTBOUND','CPU','MEM'])
+    parser.add_argument('--mitigation', action='store_true')
+    parser.add_argument('--true_positive_reward', type=float, default=2.0)
+    parser.add_argument('--true_negative_reward', type=float, default=0)
+    parser.add_argument('--false_positive_reward', type=float, default=-4)
+    parser.add_argument('--false_negative_reward', type=float, default=-10)
+    parser.add_argument('--no_proxy_host', action='store_true')
+    parser.add_argument('--manager_port', type=int, default=5000)
+
+    # Convert config dict to args list
+    args_list = []
+    for k, v in config.items():
+        flag = f"--{k}"
+        if isinstance(v, bool):
+            if v:
+                args_list.append(flag)
+        elif isinstance(v, list):
+            if k == 'probe_metrics':
+                args_list.extend([flag, ",".join(map(str, v))])
+            else:
+                continue
+        else:
+            args_list.extend([flag, str(v)])
+    return parser.parse_args(args_list)
+
+
+def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global resubscribe_interval_seconds, epoch_batches
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
-    parser = argparse.ArgumentParser(description='Start the consumer for the specific vehicle.')
-    parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
-    parser.add_argument('--buffer_size', type=int, default=10000, help='Size of the message buffer')
-    parser.add_argument('--batch_size', type=int, default=32, help='Size of the batch')
-    parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
-    parser.add_argument('--weights_push_freq_seconds', type=int, default=300, help='Seconds interval between weights push')
-    parser.add_argument('--weights_pull_freq_seconds', type=int, default=300, help='Seconds interval between weights pulling from coordinator')
-    parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15, help='Seconds interval between Kafka topic update')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
-    parser.add_argument('--epoch_size', type=int, default=50, help='Number of batches per epoch (for reporting purposes)')
-    parser.add_argument('--training_freq_seconds', type=float, default=1, help='Seconds interval between training steps')
-    parser.add_argument('--save_model_freq_epochs', type=int, default=10, help='Number of epochs between model saving')
-    parser.add_argument('--model_saving_path', type=str, default='default_model.pth', help='Path to save the model')
-    parser.add_argument('--output_dim', type=int, default=1, help='Output dimension of the model')
-    parser.add_argument('--h_dim', type=int, default=128, help='Hidden dimension of the model')
-    parser.add_argument('--num_layers', type=int, default=3, help='Number of layers in the model')
-    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
-    parser.add_argument('--optimizer', type=str, default='Adam', help='Optimizer')
-    parser.add_argument('--layer_norm', action='store_true', help='Use layer normalization')
-    parser.add_argument('--input_dim', type=int, default=59, help='Input dimension of the model')
-    parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
-    parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-    parser.add_argument('--mitigation', action="store_true", help='Perform mitigation since SM launching or attend explicit command')
-    parser.add_argument('--true_positive_reward', type=float, default=2.0, help='Reward for a true positive prediction')
-    parser.add_argument('--true_negative_reward', type=float, default=0, help='Reward for a true negative prediction')
-    parser.add_argument('--false_positive_reward', type=float, default=-4, help='Reward for a false positive prediction')
-    parser.add_argument('--false_negative_reward', type=float, default=-10, help='Reward for a false negative prediction')
-    parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
-    parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
-
-    args = parser.parse_args()
+    args = args_namespace
 
     MITIGATION = args.mitigation
     MANAGER_PORT = args.manager_port
@@ -610,10 +633,8 @@ def main():
 
     mode = args.mode
     if mode == 'SW':
-        # args.input_dim = args.input_dim + len(args.probe_metrics)
         args.output_dim = 4
         average_param = 'macro'
-
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."
@@ -622,11 +643,9 @@ def main():
     logging.basicConfig(format='%(name)s-%(levelname)s-%(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(f'[{VEHICLE_NAME}_CONS]')
 
-    
-
     KAFKA_BROKER = args.kafka_broker
 
-    print(f"Starting consumer for vehicle {VEHICLE_NAME}")    
+    print(f"Starting consumer for vehicle {VEHICLE_NAME}")
 
     brain = Brain(**vars(args))
     metrics_reporter = MetricsReporter(**vars(args))
@@ -639,20 +658,20 @@ def main():
     resubscribe_interval_seconds = args.kafka_topic_update_interval_secs
     resubscription_thread = threading.Thread(target=resubscribe)
     resubscription_thread.daemon = True
-    
-    stats_consuming_thread=threading.Thread(target=consume_vehicle_data)
-    stats_consuming_thread.daemon=True
 
-    training_thread=threading.Thread(target=train_model, kwargs=vars(args))
-    training_thread.daemon=True
+    stats_consuming_thread = threading.Thread(target=consume_vehicle_data)
+    stats_consuming_thread.daemon = True
 
-    pushing_weights_thread=threading.Thread(target=push_weights, kwargs=vars(args))
-    pushing_weights_thread.daemon=True
+    training_thread = threading.Thread(target=train_model, kwargs=vars(args))
+    training_thread.daemon = True
 
-    pulling_weights_thread=threading.Thread(target=pull_weights, kwargs=vars(args))
-    pulling_weights_thread.daemon=True
-    
-    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
+    pushing_weights_thread = threading.Thread(target=push_weights, kwargs=vars(args))
+    pushing_weights_thread.daemon = True
+
+    pulling_weights_thread = threading.Thread(target=pull_weights, kwargs=vars(args))
+    pulling_weights_thread.daemon = True
+
+    # Avoid setting signal handlers from within Flask request thread
     stop_threads = False
 
     stats_consuming_thread.start()
@@ -660,17 +679,128 @@ def main():
     pushing_weights_thread.start()
     pulling_weights_thread.start()
     resubscription_thread.start()
-    
-    while not stop_threads:
-        time.sleep(1)
-    
-    resubscription_thread.join(1)
-    stats_consuming_thread.join(1)
-    training_thread.join(1)
-    pushing_weights_thread.join(1)
-    pulling_weights_thread.join(1)
-    consumer.close()
-    logger.info("Exiting main thread.")
+
+    return {
+        'threads': {
+            'resubscription_thread': resubscription_thread,
+            'stats_consuming_thread': stats_consuming_thread,
+            'training_thread': training_thread,
+            'pushing_weights_thread': pushing_weights_thread,
+            'pulling_weights_thread': pulling_weights_thread
+        }
+    }
+
+
+def shutdown_runtime(threads_dict):
+    global stop_threads, consumer, logger
+    stop_threads = True
+    try:
+        threads_dict['resubscription_thread'].join(1)
+        threads_dict['stats_consuming_thread'].join(1)
+        threads_dict['training_thread'].join(1)
+        threads_dict['pushing_weights_thread'].join(1)
+        threads_dict['pulling_weights_thread'].join(1)
+    except Exception:
+        pass
+    try:
+        consumer.close()
+    except Exception:
+        pass
+    try:
+        logger.info("Exiting main thread.")
+    except Exception:
+        pass
+
+
+def create_flask_app():
+    app = Flask(__name__)
+
+    state = {
+        'configured': False,
+        'running': False,
+        'config': {},
+        'threads': None
+    }
+
+    @app.route('/health', methods=['GET'])
+    def health():
+        return jsonify({
+            'status': 'healthy',
+            'running': state['running'],
+            'configured': state['configured']
+        })
+
+    @app.route('/configure', methods=['POST'])
+    def configure():
+        try:
+            cfg = request.json or {}
+            # minimal validation
+            if 'kafka_broker' not in cfg:
+                cfg['kafka_broker'] = 'kafka:9092'
+            state['config'] = cfg
+            state['configured'] = True
+            return jsonify({'status': 'configured', 'config': state['config']})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+
+    @app.route('/start', methods=['POST'])
+    def start():
+        if not state['configured']:
+            return jsonify({'error': 'Not configured'}), 400
+        if state['running']:
+            return jsonify({'status': 'already_running'})
+        try:
+            args = build_args_from_config(state['config'])
+            runtime = start_consumer_runtime(args)
+            state['threads'] = runtime['threads']
+            state['running'] = True
+            return jsonify({'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')})
+        except Exception as e:
+            state['running'] = False
+            state['threads'] = None
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/stop', methods=['POST'])
+    def stop():
+        if not state['running']:
+            return jsonify({'status': 'already_stopped'})
+        try:
+            shutdown_runtime(state['threads'])
+            state['running'] = False
+            state['threads'] = None
+            return jsonify({'status': 'stopped'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/status', methods=['GET'])
+    def status():
+        return jsonify({
+            'running': state['running'],
+            'vehicle': os.getenv('VEHICLE_NAME'),
+            'config': state['config']
+        })
+
+    @app.route('/config', methods=['GET'])
+    def get_config():
+        return jsonify(state['config'])
+
+    @app.route('/config', methods=['PUT'])
+    def update_config():
+        try:
+            updates = request.json or {}
+            state['config'].update(updates)
+            return jsonify({'status': 'updated', 'config': state['config']})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+
+    return app
+
+
+def main():
+    app = create_flask_app()
+    # Run API server; consumer runtime will be started via /start
+    # Disable reloader to avoid spawning a second process which breaks threads
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
     
 
 

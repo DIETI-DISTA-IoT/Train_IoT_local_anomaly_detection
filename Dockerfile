@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set the working directory inside the container
 WORKDIR /consumer
 
-# Clone the repository
-RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
+# Copy local consumer code into the image (use project sources instead of cloning)
+COPY . /consumer
 
 # Set additional environment variables for Kafka connection
 ENV KAFKA_BROKER="kafka:9092"
@@ -42,5 +42,9 @@ RUN pip install --upgrade typing_extensions
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Expose the Flask API port
+EXPOSE 5000
+
 # Command to start the application
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "consume.py"]

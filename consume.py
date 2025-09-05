@@ -19,6 +19,7 @@ import numpy as np
 from threading import Lock
 from flask import Flask, request, jsonify
 import yaml
+from OpenFAIR.container_api import ContainerAPI
 
 
 batch_counter = 0
@@ -712,95 +713,35 @@ def shutdown_runtime(threads_dict):
         pass
 
 
-def create_flask_app():
-    app = Flask(__name__)
+class ConsumerAPI(ContainerAPI):
+    def __init__(self, container_name: str, port: int = 5000):
+        super().__init__(container_type='consumer', container_name=container_name, port=port)
+        self._threads = None
 
-    state = {
-        'configured': False,
-        'running': False,
-        'config': {},
-        'threads': None
-    }
+    def validate_config(self, config):
+        if 'kafka_broker' not in config:
+            config['kafka_broker'] = 'kafka:9092'
+        return True
 
-    @app.route('/health', methods=['GET'])
-    def health():
-        return jsonify({
-            'status': 'healthy',
-            'running': state['running'],
-            'configured': state['configured']
-        })
+    def handle_start(self, data):
+        if self._threads is not None:
+            return {'status': 'already_running'}
+        args = build_args_from_config(self.config)
+        runtime = start_consumer_runtime(args)
+        self._threads = runtime['threads']
+        return {'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')}
 
-    @app.route('/configure', methods=['POST'])
-    def configure():
-        try:
-            cfg = request.json or {}
-            # minimal validation
-            if 'kafka_broker' not in cfg:
-                cfg['kafka_broker'] = 'kafka:9092'
-            state['config'] = cfg
-            state['configured'] = True
-            return jsonify({'status': 'configured', 'config': state['config']})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 400
-
-    @app.route('/start', methods=['POST'])
-    def start():
-        if not state['configured']:
-            return jsonify({'error': 'Not configured'}), 400
-        if state['running']:
-            return jsonify({'status': 'already_running'})
-        try:
-            args = build_args_from_config(state['config'])
-            runtime = start_consumer_runtime(args)
-            state['threads'] = runtime['threads']
-            state['running'] = True
-            return jsonify({'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')})
-        except Exception as e:
-            state['running'] = False
-            state['threads'] = None
-            return jsonify({'error': str(e)}), 500
-
-    @app.route('/stop', methods=['POST'])
-    def stop():
-        if not state['running']:
-            return jsonify({'status': 'already_stopped'})
-        try:
-            shutdown_runtime(state['threads'])
-            state['running'] = False
-            state['threads'] = None
-            return jsonify({'status': 'stopped'})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-    @app.route('/status', methods=['GET'])
-    def status():
-        return jsonify({
-            'running': state['running'],
-            'vehicle': os.getenv('VEHICLE_NAME'),
-            'config': state['config']
-        })
-
-    @app.route('/config', methods=['GET'])
-    def get_config():
-        return jsonify(state['config'])
-
-    @app.route('/config', methods=['PUT'])
-    def update_config():
-        try:
-            updates = request.json or {}
-            state['config'].update(updates)
-            return jsonify({'status': 'updated', 'config': state['config']})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 400
-
-    return app
+    def handle_stop(self, data):
+        if self._threads is None:
+            return {'status': 'already_stopped'}
+        shutdown_runtime(self._threads)
+        self._threads = None
+        return {'status': 'stopped'}
 
 
 def main():
-    app = create_flask_app()
-    # Run API server; consumer runtime will be started via /start
-    # Disable reloader to avoid spawning a second process which breaks threads
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    api = ConsumerAPI(container_name=os.getenv('VEHICLE_NAME') or 'unknown_consumer', port=5000)
+    api.run()
     
 
 

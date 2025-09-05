@@ -21,6 +21,9 @@ WORKDIR /consumer
 # Copy local consumer code into the image (use project sources instead of cloning)
 COPY . /consumer
 
+# Ensure Python can import project-local modules
+ENV PYTHONPATH=/consumer
+
 # Set additional environment variables for Kafka connection
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME=""
@@ -40,11 +43,11 @@ confluent_Kafka
 RUN pip install --upgrade typing_extensions
 
 # Install other requirements
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r consumer/requirements.txt
 
 # Expose the Flask API port
 EXPOSE 5000
 
 # Command to start the application
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "consume.py"]
+CMD ["python", "consumer/consume.py"]

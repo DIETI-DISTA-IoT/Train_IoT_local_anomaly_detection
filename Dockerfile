@@ -15,12 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
-WORKDIR /consumer
-
-# Clone the repository
-RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
-
 # Set additional environment variables for Kafka connection
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME=""
@@ -38,6 +32,14 @@ confluent_Kafka
 
 # Python 3.13 requires this to be compatible with pytorch
 RUN pip install --upgrade typing_extensions
+
+# Set the working directory inside the container
+WORKDIR /consumer
+
+ARG CACHE_BUST=1
+
+# Clone the repository
+RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
 
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt

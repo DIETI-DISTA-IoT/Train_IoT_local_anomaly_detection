@@ -44,6 +44,9 @@ RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detecti
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Also add the OpenFAIR package to PYTHONPATH by copying the project root
+RUN git clone https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
+
 # Expose the Flask API port
 EXPOSE 5000
 

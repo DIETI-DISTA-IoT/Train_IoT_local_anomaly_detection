@@ -44,5 +44,9 @@ RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detecti
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Expose the Flask API port
+EXPOSE 5000
+
 # Command to start the application
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "consume.py"]

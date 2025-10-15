@@ -15,15 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
-WORKDIR /consumer
-
-# Copy local consumer code into the image (use project sources instead of cloning)
-COPY . /consumer
-
-# Ensure Python can import project-local modules
-ENV PYTHONPATH=/consumer
-
 # Set additional environment variables for Kafka connection
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME=""
@@ -42,12 +33,20 @@ confluent_Kafka
 # Python 3.13 requires this to be compatible with pytorch
 RUN pip install --upgrade typing_extensions
 
+# Set the working directory inside the container
+WORKDIR /consumer
+
+ARG CACHE_BUST=1
+
+# Clone the repository
+RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
+
 # Install other requirements
-RUN pip install --no-cache-dir -r consumer/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the Flask API port
 EXPOSE 5000
 
 # Command to start the application
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "consumer/consume.py"]
+CMD ["python", "consume.py"]

@@ -6,19 +6,17 @@ import time
 from confluent_kafka import Consumer, KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 import requests
-from preprocessing import Buffer, dict_to_tensor
+from preprocessing import Buffer
 from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import torch
-import signal
 import string
 import random
 import os
 import numpy as np
 from threading import Lock
-from flask import Flask, request, jsonify
-import yaml
+from flask import Flask
 from OpenFAIR.container_api import ContainerAPI
 
 
@@ -648,9 +646,14 @@ def start_consumer_runtime(args_namespace):
 
     print(f"Starting consumer for vehicle {VEHICLE_NAME}")
 
+    logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
+    logger.info(f"Starting brain for vehicle {VEHICLE_NAME}")
     brain = Brain(**vars(args))
+    logger.info(f"Starting metrics reporter for vehicle {VEHICLE_NAME}")
     metrics_reporter = MetricsReporter(**vars(args))
+    logger.info(f"Starting weights reporter for vehicle {VEHICLE_NAME}")
     weights_reporter = WeightsReporter(**vars(args))
+    logger.info(f"Starting global weights puller for vehicle {VEHICLE_NAME}")
     global_weights_puller = WeightsPuller(**vars(args))
 
     anomalies_buffer = Buffer(args.buffer_size, label=1, mode=mode)
@@ -662,15 +665,19 @@ def start_consumer_runtime(args_namespace):
 
     stats_consuming_thread = threading.Thread(target=consume_vehicle_data)
     stats_consuming_thread.daemon = True
+    logger.info(f"Starting stats consuming thread for vehicle {VEHICLE_NAME}")
 
     training_thread = threading.Thread(target=train_model, kwargs=vars(args))
     training_thread.daemon = True
+    logger.info(f"Starting training thread for vehicle {VEHICLE_NAME}")
 
     pushing_weights_thread = threading.Thread(target=push_weights, kwargs=vars(args))
     pushing_weights_thread.daemon = True
+    logger.info(f"Starting pushing weights thread for vehicle {VEHICLE_NAME}")
 
     pulling_weights_thread = threading.Thread(target=pull_weights, kwargs=vars(args))
     pulling_weights_thread.daemon = True
+    logger.info(f"Starting pulling weights thread for vehicle {VEHICLE_NAME}")
 
     # Avoid setting signal handlers from within Flask request thread
     stop_threads = False
@@ -680,6 +687,7 @@ def start_consumer_runtime(args_namespace):
     pushing_weights_thread.start()
     pulling_weights_thread.start()
     resubscription_thread.start()
+    logger.info(f"Consumer runtime started for vehicle {VEHICLE_NAME}")
 
     return {
         'threads': {
@@ -695,28 +703,33 @@ def start_consumer_runtime(args_namespace):
 def shutdown_runtime(threads_dict):
     global stop_threads, consumer, logger
     stop_threads = True
+    logger.info("Stopping consumer runtime...")
     try:
+        logger.info("Waiting for threads to stop...")
         threads_dict['resubscription_thread'].join(1)
         threads_dict['stats_consuming_thread'].join(1)
         threads_dict['training_thread'].join(1)
         threads_dict['pushing_weights_thread'].join(1)
         threads_dict['pulling_weights_thread'].join(1)
-    except Exception:
+        logger.info("Threads stopped.")
+    except Exception as e:
+        logger.error(f"Error stopping threads: {e}")
         pass
     try:
+        logger.info("Closing Kafka consumer...")
         consumer.close()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error closing Kafka consumer: {e}")
         pass
-    try:
-        logger.info("Exiting main thread.")
-    except Exception:
-        pass
-
+    logger.info("Exiting main thread.")
+    
 
 class ConsumerAPI(ContainerAPI):
     def __init__(self, container_name: str, port: int = 5000):
         super().__init__(container_type='consumer', container_name=container_name, port=port)
         self._threads = None
+        self.logger.info("ConsumerAPI initialized.")
+
 
     def validate_config(self, config):
         if 'kafka_broker' not in config:
@@ -724,18 +737,24 @@ class ConsumerAPI(ContainerAPI):
         return True
 
     def handle_start(self, data):
+        self.logger.info("Starting consumer...")
         if self._threads is not None:
+            self.logger.info("Consumer is already running.")
             return {'status': 'already_running'}
         args = build_args_from_config(self.config)
         runtime = start_consumer_runtime(args)
         self._threads = runtime['threads']
+        self.logger.info("Consumer started.")
         return {'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')}
 
     def handle_stop(self, data):
+        self.logger.info("Stopping consumer...")
         if self._threads is None:
+            self.logger.info("Consumer is already stopped.")
             return {'status': 'already_stopped'}
         shutdown_runtime(self._threads)
         self._threads = None
+        self.logger.info("Consumer stopped.")
         return {'status': 'stopped'}
 
 

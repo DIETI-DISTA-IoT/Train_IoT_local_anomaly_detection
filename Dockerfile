@@ -39,7 +39,7 @@ WORKDIR /consumer
 ARG CACHE_BUST=1
 
 # Clone the repository
-RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
+RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
 
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt

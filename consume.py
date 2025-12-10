@@ -170,6 +170,28 @@ def process_message(topic, msg):
         logger.info(f"Received {received_all_real_msg} messages: {received_attacks_msg} attacks, {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
 
 
+def send_attack_mitigation_request(vehicle_name):
+    global mitigation_times, lists_lock
+
+    url = f"http://{HOST_IP}:{MANAGER_PORT}/stop-attack"
+    data = {"vehicle_name": vehicle_name, "origin": "AI"}
+    response = requests.post(url, json=data)
+    try:
+        response_json = response.json()
+        logger.info(f"Mitigate-attack Response JSON: {response_json}")
+        mitigation_time = response_json.get('mitigation_time')
+        if mitigation_time is not None:
+            with lists_lock:
+                mitigation_times.append(mitigation_time)
+        else:
+            msg = response_json.get('message')
+            assert msg is not None
+            logger.warning(f"Mitigation req. failed. Answer: {msg}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from response: {e}")
+        response_json = {}
+
+        
 def get_status_from_manager(vehicle_name):
     url = f"http://{HOST_IP}:{MANAGER_PORT}/vehicle-status"
     data = {"vehicle_name": vehicle_name}
@@ -269,26 +291,7 @@ def consume_vehicle_data():
         logger.info(f"consumer for {VEHICLE_NAME} closed.")
 
 
-def send_attack_mitigation_request(vehicle_name):
-    global mitigation_times, lists_lock
 
-    url = f"http://{HOST_IP}:{MANAGER_PORT}/stop-attack"
-    data = {"vehicle_name": vehicle_name, "origin": "AI"}
-    response = requests.post(url, json=data)
-    try:
-        response_json = response.json()
-        logger.debug(f"Mitigate-attack Response JSON: {response_json}")
-        mitigation_time = response_json.get('mitigation_time')
-        if mitigation_time is not None:
-            with lists_lock:
-                mitigation_times.append(mitigation_time)
-        else:
-            msg = response_json.get('message')
-            assert msg is not None
-            logger.warning(f"Mitigation req. failed. Answer: {msg}")
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON from response: {e}")
-        response_json = {}
 
 
 def push_weights(**kwargs):

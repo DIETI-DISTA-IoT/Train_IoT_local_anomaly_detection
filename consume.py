@@ -333,7 +333,7 @@ def train_model(**kwargs):
         anomalies_feats, anom_main_labels = anomalies_buffer.sample(batch_size)
         attack_feats, attack_main_labels = attacks_buffer.sample(batch_size)
 
-        if len(diagnostics_feats) > 0 and len(anomalies_feats) > 0 and len(attack_feats) > 0:
+        if len(diagnostics_feats) >= batch_size and len(anomalies_feats) >= batch_size and len(attack_feats) >= batch_size:
             batch_feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
             batch_main_labels = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
         

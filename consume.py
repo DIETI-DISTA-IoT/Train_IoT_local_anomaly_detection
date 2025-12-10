@@ -142,20 +142,20 @@ def process_message(topic, msg):
     # logger.debug(f"Processing message from topic [{topic}]")
 
     if topic.endswith("_anomalies"):
-        feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor = anomalies_buffer.format(msg)
-        anomalies_buffer.add(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor)
+        feat_tensor, main_label_tensor = anomalies_buffer.format(msg)
+        anomalies_buffer.add(feat_tensor, main_label_tensor)
         received_anomalies_msg += 1
         anomalies_processed += 1
         counting_message = True
     elif topic.endswith("_normal_data"):
-        feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor = diagnostics_buffer.format(msg)
-        diagnostics_buffer.add(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor, cluster_label_tensor)
+        feat_tensor, main_label_tensor = diagnostics_buffer.format(msg)
+        diagnostics_buffer.add(feat_tensor, main_label_tensor)
         received_normal_msg += 1
         diagnostics_processed += 1
         counting_message = True
     if counting_message:
         received_all_real_msg += 1
-        online_classification(feat_tensor, final_label_tensor, main_label_tensor, aux_label_tensor)
+        online_classification(feat_tensor, main_label_tensor)
 
     if received_all_real_msg % 500 == 0:
         logger.info(f"Received {received_all_real_msg} messages: {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
@@ -310,7 +310,6 @@ def pull_weights(**kwargs):
 
 def train_model(**kwargs):
     global brain, diagnostics_processed, anomalies_processed, batch_counter, epoch_counter
-    global diagnostics_clusters_count, anomalies_clusters_count, diagnostics_cluster_percentages, anomalies_cluster_percentages
     global epoch_loss, epoch_final_accuracy, epoch_final_precision, epoch_final_recall, epoch_final_f1
     global epoch_main_accuracy, epoch_main_precision, epoch_main_recall, epoch_main_f1
     global epoch_aux_accuracy, epoch_aux_precision, epoch_aux_recall, epoch_aux_f1
@@ -335,24 +334,20 @@ def train_model(**kwargs):
         do_train_step = False
         batch_loss = 0
 
-        diagnostics_feats, diag_final_labels, diag_main_labels, diag_aux_labels, diagnostics_clusters = diagnostics_buffer.sample(batch_size)
-        anomalies_feats, anom_final_labels, anom_main_labels, anom_aux_labels, anomalies_clusters = anomalies_buffer.sample(batch_size)
+        diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(batch_size)
+        anomalies_feats, anom_main_labels = anomalies_buffer.sample(batch_size)
 
         if len(diagnostics_feats) > 0:
             batch_feats = diagnostics_feats
             do_train_step = True
             batch_main_labels = diag_main_labels
-            if mode == 'SW':
-                batch_final_labels = diag_final_labels
-                batch_aux_labels = diag_aux_labels
+
 
         if len(anomalies_feats) > 0:
             do_train_step = True
             batch_feats = (anomalies_feats if batch_feats is None else torch.vstack((batch_feats, anomalies_feats)))
             batch_main_labels = (anom_main_labels if batch_main_labels is None else torch.vstack((batch_main_labels, anom_main_labels)))
-            if mode == 'SW':
-                batch_final_labels = (anom_final_labels if batch_final_labels is None else torch.vstack((batch_final_labels, anom_final_labels)))
-                batch_aux_labels = (anom_aux_labels if batch_aux_labels is None else torch.vstack((batch_aux_labels, anom_aux_labels)))
+
 
         if do_train_step:
             batch_counter += 1
@@ -384,21 +379,7 @@ def train_model(**kwargs):
 
             batch_loss += loss
             
-            if len(diagnostics_clusters) > 0:
-                labels = diagnostics_clusters.squeeze(-1)
-                labels = labels[labels >= 0].to(torch.long)
-                if labels.numel() > 0:
-                    batch_diag_clusters = torch.bincount(labels, minlength=15)
-                    diagnostics_clusters_count += batch_diag_clusters
-                    diagnostics_cluster_percentages = diagnostics_clusters_count / diagnostics_clusters_count.sum()
-                        
-            if len(anomalies_clusters) > 0:
-                labels = anomalies_clusters.squeeze(-1)
-                labels = labels[labels >= 0].to(torch.long)
-                if labels.numel() > 0:
-                    batch_anom_clusters = torch.bincount(labels, minlength=19)
-                    anomalies_clusters_count += batch_anom_clusters
-                    anomalies_cluster_percentages = anomalies_clusters_count / anomalies_clusters_count.sum()
+            
 
             epoch_loss += batch_loss
 
@@ -447,9 +428,7 @@ def train_model(**kwargs):
                     'class_recall': epoch_main_recall,
                     'class_f1': epoch_main_f1,
                     'diagnostics_processed': diagnostics_processed,
-                    'anomalies_processed': anomalies_processed,
-                    'diagnostics_cluster_percentages': diagnostics_cluster_percentages.tolist(),
-                    'anomalies_cluster_percentages': anomalies_cluster_percentages.tolist()
+                    'anomalies_processed': anomalies_processed
                 }
 
                 if mode == 'SW':
@@ -522,8 +501,6 @@ def train_model(**kwargs):
                 epoch_main_accuracy = epoch_main_precision = epoch_main_recall = epoch_main_f1 = 0
                 epoch_aux_accuracy = epoch_aux_precision = epoch_aux_recall = epoch_aux_f1 = 0
 
-                diagnostics_clusters_count = torch.zeros(15)
-                anomalies_clusters_count = torch.zeros(19)
                     
 
                 if epoch_counter % save_model_freq_epochs == 0:
@@ -613,7 +590,7 @@ def build_args_from_config(config):
 def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
-    global anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
+    global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global resubscribe_interval_seconds, epoch_batches
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
@@ -629,11 +606,8 @@ def start_consumer_runtime(args_namespace):
 
     if args.no_proxy_host:
         configure_no_proxy()
-
-    mode = args.mode
-    if mode == 'SW':
-        args.output_dim = 4
-        average_param = 'macro'
+    
+    args.output_dim = 3
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME, "VEHICLE_NAME environment variable is not set."
@@ -656,8 +630,9 @@ def start_consumer_runtime(args_namespace):
     logger.info(f"Starting global weights puller for vehicle {VEHICLE_NAME}")
     global_weights_puller = WeightsPuller(**vars(args))
 
-    anomalies_buffer = Buffer(args.buffer_size, label=1, mode=mode)
-    diagnostics_buffer = Buffer(args.buffer_size, label=0, mode=mode)
+    attacks_buffer = Buffer(args.buffer_size)
+    anomalies_buffer = Buffer(args.buffer_size)
+    diagnostics_buffer = Buffer(args.buffer_size)
 
     resubscribe_interval_seconds = args.kafka_topic_update_interval_secs
     resubscription_thread = threading.Thread(target=resubscribe)

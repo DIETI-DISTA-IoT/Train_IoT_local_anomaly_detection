@@ -34,11 +34,10 @@ class Buffer:
         self.lock = Lock()
 
 
-    def add(self, feat_tensor, final_label_tensor, main_label_tensor):
+    def add(self, feat_tensor, main_label_tensor):
             
             with self.lock:
                 self.feats.append(feat_tensor)
-                self.final_labels.append(final_label_tensor)
                 self.main_labels.append(main_label_tensor)
                 if len(self.feats) > self.size:
                     self.feats.pop(0)
@@ -69,6 +68,6 @@ class Buffer:
 
         if len(feats) > 0:
             feats = torch.stack(feats)
-            main_labels = torch.stack(main_labels).unsqueeze(-1)
+            main_labels = torch.stack(main_labels).unsqueeze(-1).long()
             
         return feats, main_labels

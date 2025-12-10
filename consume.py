@@ -19,6 +19,8 @@ from threading import Lock
 from flask import Flask
 from OpenFAIR.container_api import ContainerAPI
 from OpenFAIR import EventType
+import wandb
+import matplotlib.pyplot as plt
 
 batch_counter = 0
 epoch_counter = 0
@@ -62,6 +64,66 @@ def thread_safe_lock(lock):
                 return func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def visual_evaluation(n=1000):
+    global brain
+    diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(n // 3)
+    anomalies_feats, anom_main_labels = anomalies_buffer.sample(n // 3)
+    attack_feats, attack_main_labels = attacks_buffer.sample(n // 3)
+    feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
+    y = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
+    brain.model.eval()
+    with brain.model_lock, torch.no_grad():
+        preds, manifold = brain.model(feats)
+        preds = preds.argmax(dim=1)
+
+
+    # PCA using torch only (2 components)
+    X = feats - feats.mean(0, keepdim=True)
+    U, S, V = torch.pca_lowrank(X, q=2)
+    X2 = X @ V[:, :2]
+
+    # Return the projected data so the caller can plot it externally
+    # return plot_results(y, preds, X2, manifold, VEHICLE_NAME)
+    return {'visual_eval_X': X2, 'visual_eval_y': y, 'visual_eval_preds': preds, 'visual_eval_manifold': manifold}
+
+
+def plot_results(Y, all_preds, pca_embed, manifold, task_name):
+
+        _, axes = plt.subplots(1, 3, figsize=(20, 4))
+
+        colors = ['r', 'g', 'b']
+
+        # First subplot
+        ax = axes[0]
+        for eventype in EventType:
+            mask = Y.squeeze() == eventype.value
+            ax.scatter(pca_embed[mask, 0], pca_embed[mask, 1],
+                    c=colors[eventype.value], s=15, alpha=0.1, label=eventype.name)
+        ax.set_title(f'Input-Space (2D-PCA) {task_name}')
+        ax.legend()
+
+        # Second subplot
+        ax = axes[1]
+        for eventype in EventType:
+            mask = Y.squeeze() == eventype.value
+            ax.scatter(manifold[mask, 0], manifold[mask, 1],
+                    c=colors[eventype.value], s=15, alpha=0.1, label=eventype.name)
+        ax.set_title(f'2D-Representation-Space (labels) {task_name}')
+        ax.legend()
+        
+
+        # Third subplot
+        ax = axes[2]
+        for eventype in EventType:
+            mask = all_preds == eventype.value
+            ax.scatter(manifold[mask, 0], manifold[mask, 1],
+                    c=colors[eventype.value], s=15, alpha=0.1, label=eventype.name)
+        ax.set_title(f'Predictions {task_name}')
+        ax.legend()
+        plt.savefig(f'{task_name}_manifold_projection.png')
+        return plt
 
 
 def create_consumer():
@@ -191,7 +253,7 @@ def send_attack_mitigation_request(vehicle_name):
         logger.error(f"Error decoding JSON from response: {e}")
         response_json = {}
 
-        
+
 def get_status_from_manager(vehicle_name):
     url = f"http://{HOST_IP}:{MANAGER_PORT}/vehicle-status"
     data = {"vehicle_name": vehicle_name}
@@ -289,10 +351,6 @@ def consume_vehicle_data():
     finally:
         consumer.close()
         logger.info(f"consumer for {VEHICLE_NAME} closed.")
-
-
-
-
 
 def push_weights(**kwargs):
     while not stop_threads:
@@ -412,6 +470,8 @@ def train_model(**kwargs):
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')
                     logger.info(f"Saving model after {epoch_counter} epochs as {model_path}.")
                     brain.save_model()
+                    visual_eval_dict = visual_evaluation()
+                    metrics_reporter.report(visual_eval_dict)
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

@@ -471,6 +471,7 @@ def train_model(**kwargs):
                     logger.info(f"Saving model after {epoch_counter} epochs as {model_path}.")
                     brain.save_model()
                     visual_eval_dict = visual_evaluation()
+                    logger.info(f"Sending visual evaluation results to wandber...")
                     metrics_reporter.report(visual_eval_dict)
 
         time.sleep(kwargs.get('training_freq_seconds', 1))

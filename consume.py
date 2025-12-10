@@ -86,7 +86,7 @@ def visual_evaluation(n=1000):
 
     # Return the projected data so the caller can plot it externally
     # return plot_results(y, preds, X2, manifold, VEHICLE_NAME)
-    return {'visual_eval_X': X2, 'visual_eval_y': y.numpy(), 'visual_eval_preds': preds.numpy(), 'visual_eval_manifold': manifold.numpy()}
+    return {'visual_eval_X': X2.numpy(), 'visual_eval_y': y.numpy(), 'visual_eval_preds': preds.numpy(), 'visual_eval_manifold': manifold.numpy()}
 
 
 def plot_results(Y, all_preds, pca_embed, manifold, task_name):

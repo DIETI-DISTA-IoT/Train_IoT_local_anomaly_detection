@@ -57,6 +57,14 @@ columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Time
                         'Posizione', 'Sistema', 'Componente', 'Timestamp segnale', 'Test']
 
 
+def encode_array(arr):
+    return {
+        "data": arr.tobytes().hex(),
+        "shape": arr.shape,
+        "dtype": str(arr.dtype)
+    }
+
+
 def thread_safe_lock(lock):
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -86,7 +94,12 @@ def visual_evaluation(n=1000):
 
     # Return the projected data so the caller can plot it externally
     # return plot_results(y, preds, X2, manifold, VEHICLE_NAME)
-    return {'visual_eval_X': X2.numpy(), 'visual_eval_y': y.numpy(), 'visual_eval_preds': preds.numpy(), 'visual_eval_manifold': manifold.numpy()}
+    return {
+    'visual_eval_X': encode_array(X2.numpy()),
+    'visual_eval_y': encode_array(y.numpy()),
+    'visual_eval_preds': encode_array(preds.numpy()),
+    'visual_eval_manifold': encode_array(manifold.numpy())
+    }
 
 
 def plot_results(Y, all_preds, pca_embed, manifold, task_name):

@@ -24,17 +24,11 @@ import matplotlib.pyplot as plt
 
 batch_counter = 0
 epoch_counter = 0
-received_all_real_msg = 0
-received_attacks_msg = 0
-received_anomalies_msg = 0
-received_normal_msg = 0
+records_processed = 0
 attacks_processed = 0
 anomalies_processed = 0
 diagnostics_processed = 0
-diagnostics_clusters_count = torch.zeros(15)
-anomalies_clusters_count = torch.zeros(19)
-diagnostics_cluster_percentages =torch.zeros(15)
-anomalies_cluster_percentages = torch.zeros(19)
+
 
 epoch_loss = 0
 
@@ -203,8 +197,7 @@ def process_message(topic, msg):
     """
         Process the deserialized message based on its topic.
     """
-    global received_all_real_msg
-    global received_anomalies_msg, received_normal_msg, received_attacks_msg
+    global records_processed
     global anomalies_processed, diagnostics_processed, attacks_processed
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
 
@@ -217,32 +210,28 @@ def process_message(topic, msg):
             del msg[col]
 
     if topic.endswith("_anomalies"):
-
+        counting_message = True
         if msg['event_type'] == EventType.ANOMALY.value:
             feat_tensor, main_label_tensor = anomalies_buffer.format(msg)
             anomalies_buffer.add(feat_tensor, main_label_tensor)
-            received_anomalies_msg += 1
             anomalies_processed += 1
+
         elif msg['event_type'] == EventType.ATTACK.value:
             feat_tensor, main_label_tensor = attacks_buffer.format(msg)
             attacks_buffer.add(feat_tensor, main_label_tensor)
-            received_attacks_msg += 1
             attacks_processed += 1
-
-        
-        counting_message = True
     elif topic.endswith("_normal_data"):
+        counting_message = True
         feat_tensor, main_label_tensor = diagnostics_buffer.format(msg)
         diagnostics_buffer.add(feat_tensor, main_label_tensor)
-        received_normal_msg += 1
         diagnostics_processed += 1
-        counting_message = True
+        
     if counting_message:
-        received_all_real_msg += 1
+        records_processed += 1
         online_classification(feat_tensor, main_label_tensor)
 
-    if received_all_real_msg % 500 == 0:
-        logger.info(f"Received {received_all_real_msg} messages: {received_attacks_msg} attacks, {received_anomalies_msg} anomalies, {received_normal_msg} diagnostics.")
+    if records_processed % 500 == 0:
+        logger.info(f"Received {records_processed} messages: {attacks_processed} attacks, {anomalies_processed} anomalies, {diagnostics_processed} diagnostics.")
 
 
 def send_attack_mitigation_request(vehicle_name):
@@ -384,7 +373,7 @@ def pull_weights(**kwargs):
 
 
 def train_model(**kwargs):
-    global brain, diagnostics_processed, anomalies_processed, batch_counter, epoch_counter
+    global brain, batch_counter, epoch_counter
     global epoch_loss
     global epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
     global mitigation_reward, mitigation_times
@@ -446,7 +435,9 @@ def train_model(**kwargs):
                     'class_recall': epoch_recall,
                     'class_f1': epoch_f1,
                     'diagnostics_processed': diagnostics_processed,
-                    'anomalies_processed': anomalies_processed
+                    'anomalies_processed': anomalies_processed,
+                    'attacks_processed': attacks_processed,
+                    'records_processed': records_processed
                 }
                 
                 if len(online_batch_labels) > 20:
@@ -522,7 +513,8 @@ def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
-    global resubscribe_interval_seconds, epoch_batches
+    global eval_attacks_buffer, eval_anomalies_buffer, eval_diagnostics_buffer
+    global resubscribe_interval_seconds, epoch_batches, adversarial_degree
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
     args = args_namespace
@@ -549,7 +541,9 @@ def start_consumer_runtime(args_namespace):
 
     KAFKA_BROKER = args.kafka_broker
 
-    print(f"Starting consumer for vehicle {VEHICLE_NAME}")
+    logger.info(f"Starting consumer for vehicle {VEHICLE_NAME} with adversarial evaluation degree {args.adversarial_degree}")
+    adversarial_degree = args.adversarial_degree
+
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
     logger.info(f"Starting brain for vehicle {VEHICLE_NAME}")

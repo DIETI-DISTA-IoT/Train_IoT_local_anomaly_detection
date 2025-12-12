@@ -28,7 +28,8 @@ records_processed = 0
 attacks_processed = 0
 anomalies_processed = 0
 diagnostics_processed = 0
-
+eval_anomalies_processed = 0
+eval_attacks_processed = 0
 
 epoch_loss = 0
 
@@ -71,8 +72,8 @@ def thread_safe_lock(lock):
 def visual_evaluation(n=1000):
     global brain
     diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(n // 3)
-    anomalies_feats, anom_main_labels = anomalies_buffer.sample(n // 3)
-    attack_feats, attack_main_labels = attacks_buffer.sample(n // 3)
+    anomalies_feats, anom_main_labels = eval_anomalies_buffer.sample(n // 3)
+    attack_feats, attack_main_labels = eval_attacks_buffer.sample(n // 3)
     feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
     y = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
     brain.model.eval()
@@ -200,6 +201,8 @@ def process_message(topic, msg):
     global records_processed
     global anomalies_processed, diagnostics_processed, attacks_processed
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
+    global eval_anomalies_buffer, eval_attacks_buffer
+    global eval_anomalies_processed, eval_attacks_processed
 
 
     counting_message = False
@@ -209,7 +212,17 @@ def process_message(topic, msg):
         if col in msg:
             del msg[col]
 
-    if topic.endswith("_anomalies"):
+    if topic.endswith("_eval_anomalies"):
+        if msg['event_type'] == EventType.ANOMALY.value:
+            feat_tensor, main_label_tensor = eval_anomalies_buffer.format(msg)
+            eval_anomalies_buffer.add(feat_tensor, main_label_tensor)
+            eval_anomalies_processed += 1
+        elif msg['event_type'] == EventType.ATTACK.value:
+            feat_tensor, main_label_tensor = eval_attacks_buffer.format(msg)
+            eval_attacks_buffer.add(feat_tensor, main_label_tensor)
+            eval_attacks_processed += 1
+
+    elif topic.endswith("_anomalies"):
         counting_message = True
         if msg['event_type'] == EventType.ANOMALY.value:
             feat_tensor, main_label_tensor = anomalies_buffer.format(msg)
@@ -220,6 +233,7 @@ def process_message(topic, msg):
             feat_tensor, main_label_tensor = attacks_buffer.format(msg)
             attacks_buffer.add(feat_tensor, main_label_tensor)
             attacks_processed += 1
+
     elif topic.endswith("_normal_data"):
         counting_message = True
         feat_tensor, main_label_tensor = diagnostics_buffer.format(msg)
@@ -232,7 +246,7 @@ def process_message(topic, msg):
 
     if records_processed % 500 == 0:
         logger.info(f"Received {records_processed} messages: {attacks_processed} attacks, {anomalies_processed} anomalies, {diagnostics_processed} diagnostics.")
-
+        logger.info(f"Received {eval_anomalies_processed} eval_anomalies, {eval_attacks_processed} eval_attacks.")
 
 def send_attack_mitigation_request(vehicle_name):
     global mitigation_times, lists_lock
@@ -309,7 +323,7 @@ def subscribe_to_topics():
     """
     global consumer
 
-    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_normal_data"]
+    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_eval_anomalies" ,f"{VEHICLE_NAME}_normal_data"]
     consumer.subscribe(topics)
     global_weights_puller.subscribe()
     logger.debug(f"(re)subscribed to topics: {topics}")
@@ -513,7 +527,7 @@ def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
-    global eval_attacks_buffer, eval_anomalies_buffer, eval_diagnostics_buffer
+    global eval_attacks_buffer, eval_anomalies_buffer
     global resubscribe_interval_seconds, epoch_batches, adversarial_degree
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
@@ -556,7 +570,9 @@ def start_consumer_runtime(args_namespace):
     global_weights_puller = WeightsPuller(**vars(args))
 
     attacks_buffer = Buffer(args.buffer_size)
+    eval_attacks_buffer = Buffer(args.buffer_size)
     anomalies_buffer = Buffer(args.buffer_size)
+    eval_anomalies_buffer = Buffer(args.buffer_size)
     diagnostics_buffer = Buffer(args.buffer_size)
 
     resubscribe_interval_seconds = args.kafka_topic_update_interval_secs

@@ -26,7 +26,7 @@ batch_counter = 0
 epoch_counter = 0
 records_processed = 0
 attacks_processed = 0
-anomalies_processed = 0
+anoms_processed = 0
 diagnostics_processed = 0
 eval_anomalies_processed = 0
 eval_attacks_processed = 0
@@ -216,7 +216,8 @@ def process_message(topic, msg):
     """
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
     global eval_anomalies_buffer, eval_attacks_buffer
-
+    global anoms_processed, diagnostics_processed, attacks_processed, records_processed
+    global eval_anomalies_processed, eval_attacks_processed
 
     counting_message = False
     # logger.debug(f"Processing message from topic [{topic}]")
@@ -406,7 +407,8 @@ def train_model(**kwargs):
     global mitigation_reward, mitigation_times
     global online_batch_labels, online_main_batch_preds
     global lists_lock
-    
+    global anoms_processed, diagnostics_processed, attacks_processed, records_processed
+    global eval_anomalies_processed, eval_attacks_processed
     lists_lock = Lock()
 
     batch_size = kwargs.get('batch_size', 32)
@@ -471,7 +473,7 @@ def train_model(**kwargs):
                     'class_recall': epoch_recall,
                     'class_f1': epoch_f1,
                     'diagnostics_processed': diagnostics_processed,
-                    'anoms_processed': anomalies_processed,
+                    'anoms_processed': anoms_processed,
                     'attacks_processed': attacks_processed,
                     'records_processed': records_processed,
                     'eval_anoms_processed': eval_anomalies_processed,

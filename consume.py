@@ -518,54 +518,6 @@ def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
 
 
-def build_args_from_config(config):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--kafka_broker', type=str, default='kafka:9092')
-    parser.add_argument('--buffer_size', type=int, default=10000)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--logging_level', type=str, default='INFO')
-    parser.add_argument('--weights_push_freq_seconds', type=int, default=300)
-    parser.add_argument('--weights_pull_freq_seconds', type=int, default=300)
-    parser.add_argument('--kafka_topic_update_interval_secs', type=int, default=15)
-    parser.add_argument('--learning_rate', type=float, default=0.001)
-    parser.add_argument('--epoch_size', type=int, default=50)
-    parser.add_argument('--training_freq_seconds', type=float, default=1)
-    parser.add_argument('--save_model_freq_epochs', type=int, default=10)
-    parser.add_argument('--model_saving_path', type=str, default='default_model.pth')
-    parser.add_argument('--output_dim', type=int, default=1)
-    parser.add_argument('--h_dim', type=int, default=128)
-    parser.add_argument('--num_layers', type=int, default=3)
-    parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--optimizer', type=str, default='Adam')
-    parser.add_argument('--layer_norm', action='store_true')
-    parser.add_argument('--input_dim', type=int, default=59)
-    parser.add_argument('--mode', type=str, default='OF')
-    parser.add_argument('--probe_metrics', type=parse_str_list, default=['RTT','INBOUND','OUTBOUND','CPU','MEM'])
-    parser.add_argument('--mitigation', action='store_true')
-    parser.add_argument('--true_positive_reward', type=float, default=2.0)
-    parser.add_argument('--true_negative_reward', type=float, default=0)
-    parser.add_argument('--false_positive_reward', type=float, default=-4)
-    parser.add_argument('--false_negative_reward', type=float, default=-10)
-    parser.add_argument('--no_proxy_host', action='store_true')
-    parser.add_argument('--manager_port', type=int, default=5000)
-
-    # Convert config dict to args list
-    args_list = []
-    for k, v in config.items():
-        flag = f"--{k}"
-        if isinstance(v, bool):
-            if v:
-                args_list.append(flag)
-        elif isinstance(v, list):
-            if k == 'probe_metrics':
-                args_list.extend([flag, ",".join(map(str, v))])
-            else:
-                continue
-        else:
-            args_list.extend([flag, str(v)])
-    return parser.parse_args(args_list)
-
-
 def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
@@ -695,8 +647,7 @@ class ConsumerAPI(ContainerAPI):
         if self._threads is not None:
             self.logger.info("Consumer is already running.")
             return {'status': 'already_running'}
-        args = build_args_from_config(self.config)
-        runtime = start_consumer_runtime(args)
+        runtime = start_consumer_runtime(argparse.Namespace(**self.config))
         self._threads = runtime['threads']
         self.logger.info("Consumer started.")
         return {'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')}

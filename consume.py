@@ -75,7 +75,7 @@ def visual_evaluation(n=1000):
     anomalies_feats, anom_main_labels = eval_anomalies_buffer.sample(n // 3)
     attack_feats, attack_main_labels = eval_attacks_buffer.sample(n // 3)
 
-    if len(diagnostics_feats) < 100 or len(anomalies_feats) < 100 or len(attack_feats) < 100:
+    if len(diagnostics_feats) < 10 or len(anomalies_feats) < 10 or len(attack_feats) < 10:
         return None
     
     feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))

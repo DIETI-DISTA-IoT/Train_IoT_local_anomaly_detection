@@ -410,9 +410,18 @@ def train_model(**kwargs):
         anomalies_feats, anom_main_labels = anomalies_buffer.sample(batch_size)
         attack_feats, attack_main_labels = attacks_buffer.sample(batch_size)
 
+        if adversarial_training:
+            adv_anomalies_feats, adv_anom_main_labels = eval_anomalies_buffer.sample(batch_size)
+            adv_attack_feats, adv_attack_main_labels = eval_attacks_buffer.sample(batch_size)
+
         if len(diagnostics_feats) >= batch_size and len(anomalies_feats) >= batch_size and len(attack_feats) >= batch_size:
-            batch_feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
-            batch_main_labels = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
+
+            if adversarial_training:
+                batch_feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats, adv_anomalies_feats, adv_attack_feats))
+                batch_main_labels = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels, adv_anom_main_labels, adv_attack_main_labels))
+            else:
+                batch_feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
+                batch_main_labels = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
         
             batch_counter += 1
             batch_logits, batch_loss = brain.train_step(batch_feats, batch_main_labels)
@@ -527,7 +536,7 @@ def start_consumer_runtime(args_namespace):
     global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
-    global eval_attacks_buffer, eval_anomalies_buffer
+    global eval_attacks_buffer, eval_anomalies_buffer, adversarial_training
     global resubscribe_interval_seconds, epoch_batches, adversarial_degree
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
@@ -556,8 +565,9 @@ def start_consumer_runtime(args_namespace):
     KAFKA_BROKER = args.kafka_broker
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME} with adversarial evaluation degree {args.adversarial_degree}")
+    logger.info(f"Adversarial training: {args.adversarial_training}")
     adversarial_degree = args.adversarial_degree
-
+    adversarial_training = args.adversarial_training
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
     logger.info(f"Starting brain for vehicle {VEHICLE_NAME}")

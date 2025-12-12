@@ -74,12 +74,24 @@ def visual_evaluation(n=1000):
     diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(n // 3)
     anomalies_feats, anom_main_labels = eval_anomalies_buffer.sample(n // 3)
     attack_feats, attack_main_labels = eval_attacks_buffer.sample(n // 3)
+
+    if len(diagnostics_feats) < 100 or len(anomalies_feats) < 100 or len(attack_feats) < 100:
+        return None
+    
     feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
     y = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
     brain.model.eval()
     with brain.model_lock, torch.no_grad():
         preds, manifold = brain.model(feats)
         preds = preds.argmax(dim=1)
+
+    y = y.numpy()
+    preds = preds.numpy()
+
+    adv_eval_accuracy = accuracy_score(y, preds)
+    adv_eval_precision = precision_score(y, preds, zero_division=0, average='weighted')
+    adv_eval_recall = recall_score(y, preds, zero_division=0, average='weighted')
+    adv_eval_f1 = f1_score(y, preds, zero_division=0, average='weighted')
 
 
     # PCA using torch only (2 components)
@@ -91,9 +103,13 @@ def visual_evaluation(n=1000):
     # return plot_results(y, preds, X2, manifold, VEHICLE_NAME)
     return {
     'visual_eval_X': encode_array(X2.numpy()),
-    'visual_eval_y': encode_array(y.numpy()),
-    'visual_eval_preds': encode_array(preds.numpy()),
-    'visual_eval_manifold': encode_array(manifold.numpy())
+    'visual_eval_y': encode_array(y),
+    'visual_eval_preds': encode_array(preds),
+    'visual_eval_manifold': encode_array(manifold.numpy()),
+    'adv_eval_accuracy': adv_eval_accuracy,
+    'adv_eval_precision': adv_eval_precision,
+    'adv_eval_recall': adv_eval_recall,
+    'adv_eval_f1': adv_eval_f1
     }
 
 
@@ -498,8 +514,9 @@ def train_model(**kwargs):
                     logger.info(f"Saving model after {epoch_counter} epochs as {model_path}.")
                     brain.save_model()
                     visual_eval_dict = visual_evaluation()
-                    logger.info(f"Sending visual evaluation results to wandber...")
-                    metrics_reporter.report(visual_eval_dict)
+                    if visual_eval_dict is not None:
+                        logger.info(f"Sending visual evaluation results to wandber...")
+                        metrics_reporter.report(visual_eval_dict)
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

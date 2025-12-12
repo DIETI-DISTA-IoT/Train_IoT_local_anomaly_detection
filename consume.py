@@ -214,11 +214,8 @@ def process_message(topic, msg):
     """
         Process the deserialized message based on its topic.
     """
-    global records_processed
-    global anomalies_processed, diagnostics_processed, attacks_processed
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
     global eval_anomalies_buffer, eval_attacks_buffer
-    global eval_anomalies_processed, eval_attacks_processed
 
 
     counting_message = False
@@ -243,7 +240,7 @@ def process_message(topic, msg):
         if msg['event_type'] == EventType.ANOMALY.value:
             feat_tensor, main_label_tensor = anomalies_buffer.format(msg)
             anomalies_buffer.add(feat_tensor, main_label_tensor)
-            anomalies_processed += 1
+            anoms_processed += 1
 
         elif msg['event_type'] == EventType.ATTACK.value:
             feat_tensor, main_label_tensor = attacks_buffer.format(msg)
@@ -261,7 +258,7 @@ def process_message(topic, msg):
         online_classification(feat_tensor, main_label_tensor)
 
     if records_processed % 500 == 0:
-        logger.info(f"Received {records_processed} messages: {attacks_processed} attacks, {anomalies_processed} anomalies, {diagnostics_processed} diagnostics.")
+        logger.info(f"Received {records_processed} messages: {attacks_processed} attacks, {anoms_processed} anomalies, {diagnostics_processed} diagnostics.")
         logger.info(f"Received {eval_anomalies_processed} eval_anomalies, {eval_attacks_processed} eval_attacks.")
 
 def send_attack_mitigation_request(vehicle_name):
@@ -474,9 +471,11 @@ def train_model(**kwargs):
                     'class_recall': epoch_recall,
                     'class_f1': epoch_f1,
                     'diagnostics_processed': diagnostics_processed,
-                    'anomalies_processed': anomalies_processed,
+                    'anoms_processed': anomalies_processed,
                     'attacks_processed': attacks_processed,
-                    'records_processed': records_processed
+                    'records_processed': records_processed,
+                    'eval_anoms_processed': eval_anomalies_processed,
+                    'eval_attacks_processed': eval_attacks_processed
                 }
                 
                 if len(online_batch_labels) > 20:

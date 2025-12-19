@@ -584,6 +584,9 @@ def start_consumer_runtime(args_namespace):
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME} with adversarial evaluation degree {args.adversarial_degree}")
     logger.info(f"Adversarial training: {args.adversarial_training}")
+    logger.info("All arguments:")
+    for key, value in vars(args).items():
+        logger.info(f"  {key}: {value}")
     adversarial_degree = args.adversarial_degree
     adversarial_training = args.adversarial_training
 

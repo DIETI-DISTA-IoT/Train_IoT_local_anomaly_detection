@@ -16,10 +16,8 @@ import random
 import os
 import numpy as np
 from threading import Lock
-from flask import Flask
 from OpenFAIR.container_api import ContainerAPI
 from OpenFAIR import EventType
-import wandb
 import matplotlib.pyplot as plt
 
 batch_counter = 0
@@ -555,7 +553,7 @@ def start_consumer_runtime(args_namespace):
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global eval_attacks_buffer, eval_anomalies_buffer, adversarial_training
-    global resubscribe_interval_seconds, epoch_batches, adversarial_degree
+    global resubscribe_interval_seconds, epoch_batches
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
 
     args = args_namespace
@@ -582,12 +580,11 @@ def start_consumer_runtime(args_namespace):
 
     KAFKA_BROKER = args.kafka_broker
 
-    logger.info(f"Starting consumer for vehicle {VEHICLE_NAME} with adversarial evaluation degree {args.adversarial_degree}")
+    logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
     logger.info(f"Adversarial training: {args.adversarial_training}")
     logger.info("All arguments:")
     for key, value in vars(args).items():
         logger.info(f"  {key}: {value}")
-    adversarial_degree = args.adversarial_degree
     adversarial_training = args.adversarial_training
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")

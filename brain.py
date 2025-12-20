@@ -10,8 +10,7 @@ class Brain:
     def __init__(self, **kwargs):
         self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer')
-        self.mode = kwargs.get('mode', 'OF')
-        self.main_stream_optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate', 0.001))
+        self.main_stream_optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate'))
         self.main_stream_loss_function = nn.CrossEntropyLoss()
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
@@ -63,7 +62,7 @@ class Brain:
             # Recreate the optimizer with the new parameters
             main_stream_optim_class = self.main_stream_optimizer.__class__
             self.main_stream_optimizer = main_stream_optim_class(
-                self.params_for_mainstream_optimiser,
+                self.model.parameters(),
                 **{key: value for key, value in main_stream_optimizer_state['param_groups'][0].items()
                 if key != 'params'}
             )

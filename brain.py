@@ -52,7 +52,6 @@ class Brain:
             
             # Store references to the optimizer state
             main_stream_optimizer_state = self.main_stream_optimizer.state_dict()
-            aux_stream_optimizer_state = self.aux_stream_optimizer.state_dict()
             
             # Load the new weights
             self.model.load_state_dict(new_weights)
@@ -66,12 +65,5 @@ class Brain:
             self.main_stream_optimizer = main_stream_optim_class(
                 self.params_for_mainstream_optimiser,
                 **{key: value for key, value in main_stream_optimizer_state['param_groups'][0].items()
-                if key != 'params'}
-            )
-
-            aux_stream_optim_class = self.aux_stream_optimizer.__class__
-            self.aux_stream_optimizer = aux_stream_optim_class(
-                self.params_for_auxstream_optimiser,
-                **{key: value for key, value in aux_stream_optimizer_state['param_groups'][0].items()
                 if key != 'params'}
             )

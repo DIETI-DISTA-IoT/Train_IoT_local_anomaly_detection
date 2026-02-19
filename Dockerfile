@@ -44,6 +44,9 @@ RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_lo
 # Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN pip install --no-cache-dir \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
 # Also add the OpenFAIR package to PYTHONPATH by copying the project root
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 

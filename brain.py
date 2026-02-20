@@ -2,12 +2,21 @@ from modules import MLP
 import torch.optim as optim
 import torch.nn as nn
 import torch
-import threading
 from threading import Lock
 
 class Brain:
 
     def __init__(self, **kwargs):
+
+        self.seed = kwargs.get('seed', None)  # New: optional seed param
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+            print(f"Seed set to {self.seed}")
+            if 'cuda' in kwargs.get('device', 'cpu'):
+                torch.cuda.manual_seed(self.seed)
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False  # For reproducibility on GPU
+
         self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer')
         self.main_stream_optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate'))

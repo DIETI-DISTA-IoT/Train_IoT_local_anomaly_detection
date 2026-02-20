@@ -11,7 +11,6 @@ class Brain:
         self.seed = kwargs.get('seed', None)  # New: optional seed param
         if self.seed is not None:
             torch.manual_seed(self.seed)
-            print(f"Seed set to {self.seed}")
             if 'cuda' in kwargs.get('device', 'cpu'):
                 torch.cuda.manual_seed(self.seed)
                 torch.backends.cudnn.deterministic = True
@@ -49,6 +48,7 @@ class Brain:
     def save_model(self):
         with self.model_lock:
             torch.save(self.model.state_dict(), self.model_saving_path)
+            
 
     def update_weights(self, new_weights):
         """

@@ -589,6 +589,8 @@ def start_consumer_runtime(args_namespace):
 
     logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
     logger.info(f"Starting brain for vehicle {VEHICLE_NAME}")
+    if args.seed is not None:
+        logger.info(f"Random torch seed will be set to {args.seed}")
     brain = Brain(**vars(args))
     logger.info(f"Starting metrics reporter for vehicle {VEHICLE_NAME}")
     metrics_reporter = MetricsReporter(**vars(args))

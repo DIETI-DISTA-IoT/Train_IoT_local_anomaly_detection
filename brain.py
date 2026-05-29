@@ -19,12 +19,16 @@ class Brain:
             self.params_for_auxstream_optimiser = [param[1] for param in self.model.named_parameters() if 'aux_stream' in param[0]]
             self.aux_stream_optimizer = getattr(optim, optim_class_name)(self.params_for_auxstream_optimiser, lr=kwargs.get('learning_rate', 0.001))
             self.aux_stream_loss_function = nn.BCELoss()
-        # self.final_head_loss_function = nn.CrossEntropyLoss()
 
         self.device = torch.device(kwargs.get('device', 'cpu'))
         self.model.to(self.device)
         self.model_lock = Lock()
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
+
+        # FedProx: proximal coefficient (0 disables the term, recovering FedAvg)
+        self.fedprox_mu = kwargs.get('fedprox_mu', 0.0)
+        # Frozen reference point set each time the global model is pulled
+        self.global_weights = None
         
 
     def train_step(self, feats, final_labels, main_labels, aux_labels):
@@ -51,6 +55,18 @@ class Brain:
                 aux_stream_loss = self.aux_stream_loss_function(aux_pred, aux_labels.float())
             
             loss = main_stream_loss + aux_stream_loss
+
+            # FedProx proximal term: mu/2 * ||w - w_global||^2
+            # Anchors local updates to the last received global model,
+            # preventing divergence under heterogeneous data distributions.
+            if self.fedprox_mu > 0.0 and self.global_weights is not None:
+                prox_term = sum(
+                    ((param - self.global_weights[name].to(self.device)) ** 2).sum()
+                    for name, param in self.model.named_parameters()
+                    if name in self.global_weights
+                )
+                loss = loss + (self.fedprox_mu / 2.0) * prox_term
+
             loss.backward()
             self.main_stream_optimizer.step()
             main_pred = main_pred.detach()
@@ -69,6 +85,11 @@ class Brain:
     def save_model(self):
         with self.model_lock:
             torch.save(self.model.state_dict(), self.model_saving_path)
+
+    def set_global_reference(self, weights):
+        """Store a frozen copy of the global model to use as the FedProx anchor."""
+        with self.model_lock:
+            self.global_weights = {k: v.detach().clone().to(self.device) for k, v in weights.items()}
 
     def update_weights(self, new_weights):
         """

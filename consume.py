@@ -305,6 +305,9 @@ def pull_weights(**kwargs):
         new_weights = global_weights_puller.pull_weights()
         if new_weights:
             brain.update_weights(new_weights)
+            # Update the FedProx anchor point to the freshly received global model.
+            # When fedprox_mu == 0 this is a no-op (the stored reference is never read).
+            brain.set_global_reference(new_weights)
             logger.info("Local weights updated using global model.")
 
 
@@ -592,6 +595,8 @@ def build_args_from_config(config):
     parser.add_argument('--false_negative_reward', type=float, default=-10)
     parser.add_argument('--no_proxy_host', action='store_true')
     parser.add_argument('--manager_port', type=int, default=5000)
+    parser.add_argument('--fedprox_mu', type=float, default=0.0,
+                        help='FedProx proximal coefficient (0 = disabled, recovers FedAvg behaviour)')
 
     # Convert config dict to args list
     args_list = []
@@ -762,7 +767,6 @@ def main():
     api = ConsumerAPI(container_name=os.getenv('VEHICLE_NAME') or 'unknown_consumer', port=5000)
     api.run()
     
-
 
 if __name__=="__main__":
     main()

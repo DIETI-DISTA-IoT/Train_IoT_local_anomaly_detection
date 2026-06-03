@@ -23,36 +23,35 @@ ENV CONTAINER_NAME="generic_consumer"
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 
+# Full rebuild bust: pass CACHE_BUST=<timestamp> to re-run pip install AND code clone.
+# Used by:  make build-consumer-scache
+ARG CACHE_BUST=1
+
 RUN pip install --no-cache-dir \
     torch --index-url https://download.pytorch.org/whl/cpu
 
-# We are actually working with confluent_Kafka version 2.6.1. 
+# We are actually working with confluent_Kafka version 2.6.1.
 RUN pip install --no-cache-dir \
-confluent_Kafka
+    confluent_kafka
 
 # Python 3.13 requires this to be compatible with pytorch
 RUN pip install --upgrade typing_extensions
 
-# Set the working directory inside the container
+# Install dependencies from the build context (submodule checkout on disk).
+# This layer is cached when using scache-nolib; re-run only when using scache.
+COPY consumer/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Code-only bust: pass CODE_BUST=<timestamp> to re-run only the git clones, keeping pip cached.
+# Used by:  make build-consumer-scache-nolib
+ARG CODE_BUST=1
+
 WORKDIR /consumer
 
-ARG CACHE_BUST=1
-
-# Clone the repository
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
-
-# Install other requirements
-RUN pip install --no-cache-dir -r requirements.txt
-
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu
-
-# Also add the OpenFAIR package to PYTHONPATH by copying the project root
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 
-# Expose the Flask API port
 EXPOSE 5000
 
-# Command to start the application
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "consume.py"]

@@ -91,14 +91,10 @@ def visual_evaluation(n=1000):
     adv_eval_recall = recall_score(y, preds, zero_division=0, average='weighted')
     adv_eval_f1 = f1_score(y, preds, zero_division=0, average='weighted')
 
-
-    # PCA using torch only (2 components)
     X = feats - feats.mean(0, keepdim=True)
     U, S, V = torch.pca_lowrank(X, q=2)
     X2 = X @ V[:, :2]
 
-    # Return the projected data so the caller can plot it externally
-    # return plot_results(y, preds, X2, manifold, VEHICLE_NAME)
     return {
     'visual_eval_X': encode_array(X2.numpy()),
     'visual_eval_y': encode_array(y),
@@ -117,7 +113,6 @@ def plot_results(Y, all_preds, pca_embed, manifold, task_name):
 
         colors = ['r', 'g', 'b']
 
-        # First subplot
         ax = axes[0]
         for eventype in EventType:
             mask = Y.squeeze() == eventype.value
@@ -126,7 +121,6 @@ def plot_results(Y, all_preds, pca_embed, manifold, task_name):
         ax.set_title(f'Input-Space (2D-PCA) {task_name}')
         ax.legend()
 
-        # Second subplot
         ax = axes[1]
         for eventype in EventType:
             mask = Y.squeeze() == eventype.value
@@ -134,9 +128,7 @@ def plot_results(Y, all_preds, pca_embed, manifold, task_name):
                     c=colors[eventype.value], s=15, alpha=0.1, label=eventype.name)
         ax.set_title(f'2D-Representation-Space (labels) {task_name}')
         ax.legend()
-        
 
-        # Third subplot
         ax = axes[2]
         for eventype in EventType:
             mask = all_preds == eventype.value
@@ -152,11 +144,10 @@ def create_consumer():
     def generate_random_string(length=10):
         letters = string.ascii_letters + string.digits
         return ''.join(random.choice(letters) for i in range(length))
-    # Kafka consumer configuration
     conf_cons = {
-        'bootstrap.servers': KAFKA_BROKER,  # Kafka broker URL
-        'group.id': f'{VEHICLE_NAME}-consumer-group'+generate_random_string(7),  # Consumer group ID for message offset tracking
-        'auto.offset.reset': 'earliest'  # Start reading from the earliest message if no offset is present
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': f'{VEHICLE_NAME}-consumer-group'+generate_random_string(7),
+        'auto.offset.reset': 'earliest'
     }
     return Consumer(conf_cons)
 
@@ -164,9 +155,6 @@ def create_consumer():
 def check_and_create_topics(topic_list):
     """
     Check if the specified topics exist in Kafka, and create them if missing.
-
-    Args:
-        topic_list (list): List of topic names to check/create.
     """
     admin_client = AdminClient({'bootstrap.servers': KAFKA_BROKER})
     existing_topics = admin_client.list_topics(timeout=10).topics.keys()
@@ -189,17 +177,7 @@ def check_and_create_topics(topic_list):
 
 
 def deserialize_message(msg):
-    """
-    Deserialize the JSON-serialized data received from the Kafka Consumer.
-
-    Args:
-        msg (Message): The Kafka message object.
-
-    Returns:
-        dict or None: The deserialized Python dictionary if successful, otherwise None.
-    """
     try:
-        # Decode the message and deserialize it into a Python dictionary
         message_value = json.loads(msg.value().decode('utf-8'))
         logger.debug(f"received message from topic [{msg.topic()}]")
         return message_value
@@ -209,16 +187,12 @@ def deserialize_message(msg):
 
 
 def process_message(topic, msg):
-    """
-        Process the deserialized message based on its topic.
-    """
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
     global eval_anomalies_buffer, eval_attacks_buffer
     global anoms_processed, diagnostics_processed, attacks_processed, records_processed
     global eval_anomalies_processed, eval_attacks_processed
 
     counting_message = False
-    # logger.debug(f"Processing message from topic [{topic}]")
 
     for col in columns_to_delete:
         if col in msg:
@@ -260,6 +234,7 @@ def process_message(topic, msg):
         logger.info(f"Received {records_processed} messages: {attacks_processed} attacks, {anoms_processed} anomalies, {diagnostics_processed} diagnostics.")
         logger.info(f"Received {eval_anomalies_processed} eval_anomalies, {eval_attacks_processed} eval_attacks.")
 
+
 def send_attack_mitigation_request(vehicle_name):
     global mitigation_times, lists_lock
 
@@ -295,20 +270,16 @@ def mitigation_and_rewarding(prediction, current_label):
     global mitigation_reward
     if prediction == 2:
         if current_label == prediction:
-            # True positive.
             if MITIGATION:
                 if get_status_from_manager(VEHICLE_NAME) == "INFECTED":
                     send_attack_mitigation_request(VEHICLE_NAME)
             mitigation_reward += true_positive_reward
         else:
-            # False positive
             mitigation_reward += false_positive_reward
     else:
         if current_label == prediction:
-            # True negative
             mitigation_reward += true_negative_reward
         else:
-            # False negative
             mitigation_reward += false_negative_reward
 
 
@@ -330,35 +301,27 @@ def online_classification(feat_tensor, main_label_tensor):
 
 
 def subscribe_to_topics():
-    """
-        Subscribe to a list of Kafka topics.
-    """
     global consumer
-
-    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_eval_anomalies" ,f"{VEHICLE_NAME}_normal_data"]
+    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_eval_anomalies", f"{VEHICLE_NAME}_normal_data"]
     consumer.subscribe(topics)
     global_weights_puller.subscribe()
     logger.debug(f"(re)subscribed to topics: {topics}")
 
 
 def consume_vehicle_data():
-    """
-        Consume messages for a specific vehicle from Kafka topics.
-    """
     global consumer
 
-    stats_topic= f"{VEHICLE_NAME}_statistics"
+    stats_topic = f"{VEHICLE_NAME}_statistics"
     weights_topic = f"{VEHICLE_NAME}_weights"
 
     check_and_create_topics([stats_topic, weights_topic])
 
     consumer = create_consumer()
-
     subscribe_to_topics()
 
     try:
         while not stop_threads:
-            msg = consumer.poll(5.0)  # Poll per 1 secondo
+            msg = consumer.poll(5.0)
             if msg is None:
                 continue
             if msg.error():
@@ -380,6 +343,7 @@ def consume_vehicle_data():
         consumer.close()
         logger.info(f"consumer for {VEHICLE_NAME} closed.")
 
+
 def push_weights(**kwargs):
     while not stop_threads:
         time.sleep(kwargs.get('weights_push_freq_seconds', 300))
@@ -391,10 +355,13 @@ def pull_weights(**kwargs):
     global brain
 
     while not stop_threads:
-        time.sleep(kwargs.get('weights_pull_freq_seconds', 300))        
+        time.sleep(kwargs.get('weights_pull_freq_seconds', 300))
         new_weights = global_weights_puller.pull_weights()
         if new_weights:
             brain.update_weights(new_weights)
+            # Update the FedProx anchor point to the freshly received global model.
+            # When fedprox_mu == 0 this is a no-op (the stored reference is never read).
+            brain.set_global_reference(new_weights)
             logger.info("Local weights updated using global model.")
 
 
@@ -446,19 +413,15 @@ def train_model(**kwargs):
             batch_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')            
             
             epoch_loss += batch_loss
-
             epoch_accuracy += batch_accuracy
             epoch_precision += batch_precision
             epoch_recall += batch_recall
             epoch_f1 += batch_f1
 
-
             if batch_counter % epoch_size == 0:
                 
                 epoch_counter += 1
-
                 epoch_loss /= epoch_size
-
                 epoch_accuracy /= epoch_size
                 epoch_precision /= epoch_size
                 epoch_recall /= epoch_size
@@ -502,11 +465,8 @@ def train_model(**kwargs):
                         mitigation_times = []
                         mitigation_reward = 0
 
-
                 metrics_reporter.report(metrics_dict)
-                
                 epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
-
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')
@@ -527,9 +487,8 @@ def signal_handler(sig, frame):
 
 
 def resubscribe():
-    while  not stop_threads:
+    while not stop_threads:
         try:
-            # Wait for a certain interval before resubscribing
             time.sleep(resubscribe_interval_seconds)
             subscribe_to_topics()
         except Exception as e:
@@ -537,12 +496,11 @@ def resubscribe():
 
 
 def parse_str_list(arg):
-    # Split the input string by commas and convert each element to int
     try:
         return [str(x) for x in arg.split(',')]
     except ValueError:
         raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
-    
+
 
 def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
@@ -568,7 +526,7 @@ def start_consumer_runtime(args_namespace):
 
     if args.no_proxy_host:
         configure_no_proxy()
-    
+
     args.output_dim = 3
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
@@ -587,7 +545,6 @@ def start_consumer_runtime(args_namespace):
         logger.info(f"  {key}: {value}")
     adversarial_training = args.adversarial_training
 
-    logger.info(f"Starting consumer for vehicle {VEHICLE_NAME}")
     logger.info(f"Starting brain for vehicle {VEHICLE_NAME}")
     if args.seed is not None:
         logger.info(f"Random torch seed will be set to {args.seed}")
@@ -625,7 +582,6 @@ def start_consumer_runtime(args_namespace):
     pulling_weights_thread.daemon = True
     logger.info(f"Starting pulling weights thread for vehicle {VEHICLE_NAME}")
 
-    # Avoid setting signal handlers from within Flask request thread
     stop_threads = False
 
     stats_consuming_thread.start()
@@ -668,14 +624,13 @@ def shutdown_runtime(threads_dict):
         logger.error(f"Error closing Kafka consumer: {e}")
         pass
     logger.info("Exiting main thread.")
-    
+
 
 class ConsumerAPI(ContainerAPI):
     def __init__(self, container_name: str, port: int = 5000):
         super().__init__(container_type='consumer', container_name=container_name, port=port)
         self._threads = None
         self.logger.info("ConsumerAPI initialized.")
-
 
     def validate_config(self, config):
         if 'kafka_broker' not in config:
@@ -706,7 +661,6 @@ class ConsumerAPI(ContainerAPI):
 def main():
     api = ConsumerAPI(container_name=os.getenv('VEHICLE_NAME') or 'unknown_consumer', port=5000)
     api.run()
-    
 
 
 if __name__=="__main__":

@@ -8,13 +8,13 @@ class Brain:
 
     def __init__(self, **kwargs):
 
-        self.seed = kwargs.get('seed', None)  # New: optional seed param
+        self.seed = kwargs.get('seed', None)
         if self.seed is not None:
             torch.manual_seed(self.seed)
             if 'cuda' in kwargs.get('device', 'cpu'):
                 torch.cuda.manual_seed(self.seed)
                 torch.backends.cudnn.deterministic = True
-                torch.backends.cudnn.benchmark = False  # For reproducibility on GPU
+                torch.backends.cudnn.benchmark = False
 
         self.model = MLP(**kwargs)
         optim_class_name = kwargs.get('optimizer')
@@ -24,22 +24,38 @@ class Brain:
         self.model.to(self.device)
         self.model_lock = Lock()
         self.model_saving_path = kwargs.get('model_saving_path', 'default_model.pth')
-        
+
+        # FedProx: proximal coefficient (0 disables the term, recovering FedAvg)
+        self.fedprox_mu = kwargs.get('fedprox_mu', 0.0)
+        # Frozen reference point updated each time the global model is pulled
+        self.global_weights = None
+
 
     def train_step(self, feats, main_labels):
-        
+
         with self.model_lock:
             self.model.train()
             self.main_stream_optimizer.zero_grad()
 
             main_pred, _ = self.model(feats)
-            main_stream_loss = 0
-            main_stream_loss = self.main_stream_loss_function(main_pred, main_labels.squeeze())
-            main_stream_loss.backward()
+            loss = self.main_stream_loss_function(main_pred, main_labels.squeeze())
+
+            # FedProx proximal term: mu/2 * ||w - w_global||^2
+            # Anchors local updates to the last received global model,
+            # preventing divergence under heterogeneous data distributions.
+            if self.fedprox_mu > 0.0 and self.global_weights is not None:
+                prox_term = sum(
+                    ((param - self.global_weights[name].to(self.device)) ** 2).sum()
+                    for name, param in self.model.named_parameters()
+                    if name in self.global_weights
+                )
+                loss = loss + (self.fedprox_mu / 2.0) * prox_term
+
+            loss.backward()
             self.main_stream_optimizer.step()
 
-            return main_pred.detach(), main_stream_loss.item()
-    
+            return main_pred.detach(), loss.item()
+
 
     def get_brain_state_copy(self):
         with self.model_lock:
@@ -50,25 +66,24 @@ class Brain:
             torch.save(self.model.state_dict(), self.model_saving_path)
             
 
+    def set_global_reference(self, weights):
+        """Store a frozen copy of the global model to use as the FedProx anchor."""
+        with self.model_lock:
+            self.global_weights = {k: v.detach().clone().to(self.device) for k, v in weights.items()}
+
     def update_weights(self, new_weights):
         """
         Safely update the model weights while preserving gradients
         """
         with self.model_lock:
-            # Create a deep copy of the model's state dict
             current_state = self.model.state_dict()
-            
-            # Store references to the optimizer state
+
             main_stream_optimizer_state = self.main_stream_optimizer.state_dict()
-            
-            # Load the new weights
             self.model.load_state_dict(new_weights)
-            
-            # Make sure the new parameters are on the correct device
+
             for param in self.model.parameters():
                 param.data = param.data.to(self.device)
-            
-            # Recreate the optimizer with the new parameters
+
             main_stream_optim_class = self.main_stream_optimizer.__class__
             self.main_stream_optimizer = main_stream_optim_class(
                 self.model.parameters(),

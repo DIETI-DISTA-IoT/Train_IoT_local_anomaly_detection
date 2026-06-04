@@ -176,6 +176,26 @@ def check_and_create_topics(topic_list):
                 logger.error(f"Failed to create topic '{topic}': {e}")
 
 
+def delete_owned_topics():
+    """Delete topics owned by this consumer container.
+    Called on shutdown so experiments always start from a clean Kafka state."""
+    owned = [
+        f"{VEHICLE_NAME}_statistics",
+        f"{VEHICLE_NAME}_weights",
+    ]
+    try:
+        admin = AdminClient({'bootstrap.servers': KAFKA_BROKER})
+        futures = admin.delete_topics(owned, operation_timeout=10)
+        for topic, future in futures.items():
+            try:
+                future.result()
+                logger.info(f"Deleted Kafka topic: {topic}")
+            except Exception as e:
+                logger.warning(f"Could not delete topic {topic} (may not exist or Kafka down): {e}")
+    except Exception as e:
+        logger.warning(f"Topic deletion failed (Kafka may be down): {e}")
+
+
 def deserialize_message(msg):
     try:
         message_value = json.loads(msg.value().decode('utf-8'))
@@ -623,6 +643,13 @@ def shutdown_runtime(threads_dict):
     except Exception as e:
         logger.error(f"Error closing Kafka consumer: {e}")
         pass
+    try:
+        metrics_reporter.producer.flush(5)
+        weights_reporter.producer.flush(5)
+        logger.info("Kafka producers flushed.")
+    except Exception as e:
+        logger.error(f"Error flushing Kafka producers: {e}")
+    delete_owned_topics()
     logger.info("Exiting main thread.")
 
 

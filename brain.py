@@ -17,6 +17,15 @@ class Brain:
                 torch.backends.cudnn.benchmark = False
 
         self.model = MLP(**kwargs)
+        
+        init_strategy = kwargs.get('initialization_strategy', None)
+        if init_strategy == 'xavier':
+            for m in self.model.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                        
         optim_class_name = kwargs.get('optimizer')
         self.main_stream_optimizer = getattr(optim, optim_class_name)(self.model.parameters(), lr=kwargs.get('learning_rate'))
         self.main_stream_loss_function = nn.CrossEntropyLoss()

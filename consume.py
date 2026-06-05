@@ -45,6 +45,7 @@ mitigation_times = []
 mitigation_reward = 0
 
 HOST_IP = os.getenv("HOST_IP")
+MANAGER_IP = None
 
 columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata', 
                         'Posizione', 'Sistema', 'Componente', 'Timestamp segnale', 'Test']
@@ -258,7 +259,7 @@ def process_message(topic, msg):
 def send_attack_mitigation_request(vehicle_name):
     global mitigation_times, lists_lock
 
-    url = f"http://{HOST_IP}:{MANAGER_PORT}/stop-attack"
+    url = f"http://{MANAGER_IP}:{MANAGER_PORT}/stop-attack"
     data = {"vehicle_name": vehicle_name, "origin": "AI"}
     response = requests.post(url, json=data)
     try:
@@ -278,7 +279,7 @@ def send_attack_mitigation_request(vehicle_name):
 
 
 def get_status_from_manager(vehicle_name):
-    url = f"http://{HOST_IP}:{MANAGER_PORT}/vehicle-status"
+    url = f"http://{MANAGER_IP}:{MANAGER_PORT}/vehicle-status"
     data = {"vehicle_name": vehicle_name}
     response = requests.post(url, json=data)
     logger.debug(f"Vehicle-status Response Status Code: {response.status_code}")
@@ -523,11 +524,11 @@ def parse_str_list(arg):
 
 
 def configure_no_proxy():
-    os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
+    os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP},{MANAGER_IP}"
 
 
 def start_consumer_runtime(args_namespace):
-    global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MITIGATION, mode, average_param
+    global VEHICLE_NAME, KAFKA_BROKER, MANAGER_PORT, MANAGER_IP, MITIGATION, mode, average_param
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global eval_attacks_buffer, eval_anomalies_buffer, adversarial_training
@@ -538,6 +539,7 @@ def start_consumer_runtime(args_namespace):
 
     MITIGATION = args.mitigation
     MANAGER_PORT = args.manager_port
+    MANAGER_IP = args.manager_ip
 
     true_positive_reward = args.true_positive_reward
     true_negative_reward = args.true_negative_reward

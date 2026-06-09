@@ -52,7 +52,7 @@ MANAGER_IP = None
 _hsja_eval_running = False
 _hsja_eval_thread = None
 
-columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata', 
+columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata',
                         'Posizione', 'Sistema', 'Componente', 'Timestamp segnale', 'Test']
 
 
@@ -81,7 +81,7 @@ def visual_evaluation(n=1000):
 
     if len(diagnostics_feats) < 10 or len(anomalies_feats) < 10 or len(attack_feats) < 10:
         return None
-    
+
     feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
     y = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
     brain.model.eval()
@@ -102,14 +102,14 @@ def visual_evaluation(n=1000):
     X2 = X @ V[:, :2]
 
     return {
-    'visual_eval_X': encode_array(X2.numpy()),
-    'visual_eval_y': encode_array(y),
-    'visual_eval_preds': encode_array(preds),
-    'visual_eval_manifold': encode_array(manifold.numpy()),
-    'adv_eval_accuracy': adv_eval_accuracy,
-    'adv_eval_precision': adv_eval_precision,
-    'adv_eval_recall': adv_eval_recall,
-    'adv_eval_f1': adv_eval_f1
+        'visual_eval_X': encode_array(X2.numpy()),
+        'visual_eval_y': encode_array(y),
+        'visual_eval_preds': encode_array(preds),
+        'visual_eval_manifold': encode_array(manifold.numpy()),
+        'adv_eval_accuracy': adv_eval_accuracy,
+        'adv_eval_precision': adv_eval_precision,
+        'adv_eval_recall': adv_eval_recall,
+        'adv_eval_f1': adv_eval_f1
     }
 
 
@@ -118,12 +118,12 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
     Run HopSkipJump attack on a small sample from each class buffer.
 
     For each sample the attacker has only hard-label (decision) access to the
-    local classifier — matching a realistic black-box threat model.
-    Returns a dict with encoded arrays for a 3-panel manifold plot plus
-    scalar robustness metrics, or None if the buffers are not yet warm enough.
+    local classifier, matching a realistic black-box threat model.
+    Returns None if buffers are not yet warm enough; otherwise reports metrics
+    directly via metrics_reporter and clears _hsja_eval_running.
 
-    The '/'-separated scalar keys (e.g. 'hsja_adv_eval/accuracy') create a
-    dedicated W&B sub-section distinct from the Gaussian 'adv_eval_*' group.
+    The '/' separator in scalar keys (e.g. 'hsja_adv_eval/accuracy') creates
+    a dedicated W&B sub-section distinct from the Gaussian 'adv_eval_*' group.
     """
     global brain, _hsja_eval_running
 
@@ -133,14 +133,13 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
 
     if len(diag_feats) < 5 or len(anom_feats) < 5 or len(atk_feats) < 5:
         _hsja_eval_running = False
-        return None
+        return
 
     all_feats = torch.vstack((diag_feats, anom_feats, atk_feats))
-    all_labels_t = torch.vstack((diag_labels, anom_labels, atk_labels))
-    all_labels_arr = all_labels_t.squeeze(1).numpy()  # shape (N,)
+    all_labels_arr = torch.vstack((diag_labels, anom_labels, atk_labels)).squeeze(1).numpy()  # (N,)
 
-    # predict_fn acquires model_lock for each individual query so lock
-    # contention with the training thread remains short and predictable.
+    # predict_fn acquires model_lock per query — short critical sections that
+    # do not starve the training thread.
     def predict_fn(x: torch.Tensor) -> int:
         brain.model.eval()
         with brain.model_lock, torch.no_grad():
@@ -155,7 +154,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
     for i in range(len(all_feats)):
         if stop_threads:
             _hsja_eval_running = False
-            return None
+            return
         x = all_feats[i]
         y_i = int(all_labels_arr[i])
         x_adv, n_q = hopskipjump_attack(
@@ -166,7 +165,6 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
         total_queries += n_q
         pert_norms.append(float(torch.norm(x_adv - x)))
         adv_examples.append(x_adv)
-        # Record what the model predicts on the adversarial example
         with brain.model_lock, torch.no_grad():
             brain.model.eval()
             adv_logits, _ = brain.model(x_adv.unsqueeze(0))
@@ -184,7 +182,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
     _, _, V = torch.pca_lowrank(X, q=2)
     X2 = (X @ V[:, :2]).numpy()
 
-    # Manifold coordinates of the adversarial examples for the centre/right panels
+    # Manifold coordinates of adversarial examples for the centre/right panels
     adv_stack = torch.stack(adv_examples)
     with brain.model_lock, torch.no_grad():
         brain.model.eval()
@@ -196,7 +194,6 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
         'hsja_visual_eval_y':        encode_array(all_labels_arr),
         'hsja_visual_eval_preds':    encode_array(adv_preds_arr),
         'hsja_visual_eval_manifold': encode_array(adv_manifold),
-        # '/' prefix groups these in a dedicated W&B section
         'hsja_adv_eval/accuracy':         adv_accuracy,
         'hsja_adv_eval/precision':        adv_precision,
         'hsja_adv_eval/recall':           adv_recall,
@@ -306,7 +303,7 @@ def delete_owned_topics():
 
 def deserialize_message(msg):
     try:
-tml_value = json.loads(msg.value().decode('utf-8'))
+        message_value = json.loads(msg.value().decode('utf-8'))
         logger.debug(f"received message from topic [{msg.topic()}]")
         return message_value
     except json.JSONDecodeError as e:
@@ -353,7 +350,7 @@ def process_message(topic, msg):
         feat_tensor, main_label_tensor = diagnostics_buffer.format(msg)
         diagnostics_buffer.add(feat_tensor, main_label_tensor)
         diagnostics_processed += 1
-        
+
     if counting_message:
         records_processed += 1
         online_classification(feat_tensor, main_label_tensor)
@@ -420,12 +417,12 @@ def online_classification(feat_tensor, main_label_tensor):
     with brain.model_lock, torch.no_grad():
         main_pred, _ = brain.model(feat_tensor.unsqueeze(0))
         main_pred = main_pred.argmax(dim=1)
-        
+
     with lists_lock:
         online_batch_labels.append(main_label_tensor)
         online_main_batch_preds.append(main_pred.squeeze())
 
-    mitigation_and_rewarding(main_pred, main_label_tensor)        
+    mitigation_and_rewarding(main_pred, main_label_tensor)
 
 
 def subscribe_to_topics():
@@ -494,7 +491,7 @@ def pull_weights(**kwargs):
 
 
 def _run_hsja_evaluation_bg(**kwargs):
-    """Background thread target: run HSJA evaluation and clear the running flag."""
+    """Background thread target: run HSJA evaluation and ensure the running flag is cleared."""
     global _hsja_eval_running
     try:
         hsja_evaluation(
@@ -546,7 +543,7 @@ def train_model(**kwargs):
             else:
                 batch_feats = torch.vstack((diagnostics_feats, anomalies_feats, attack_feats))
                 batch_main_labels = torch.vstack((diag_main_labels, anom_main_labels, attack_main_labels))
-        
+
             batch_counter += 1
             batch_logits, batch_loss = brain.train_step(batch_feats, batch_main_labels)
             batch_main_preds = batch_logits.argmax(dim=1)
@@ -554,8 +551,8 @@ def train_model(**kwargs):
             batch_accuracy = accuracy_score(batch_main_labels, batch_main_preds)
             batch_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
             batch_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
-            batch_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')            
-            
+            batch_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
+
             epoch_loss += batch_loss
             epoch_accuracy += batch_accuracy
             epoch_precision += batch_precision
@@ -563,7 +560,7 @@ def train_model(**kwargs):
             epoch_f1 += batch_f1
 
             if batch_counter % epoch_size == 0:
-                
+
                 epoch_counter += 1
                 epoch_loss /= epoch_size
                 epoch_accuracy /= epoch_size
@@ -584,7 +581,7 @@ def train_model(**kwargs):
                     'eval_anoms_processed': eval_anomalies_processed,
                     'eval_attacks_processed': eval_attacks_processed
                 }
-                
+
                 if len(online_batch_labels) > 20:
                     with lists_lock:
                         online_main_batch_accuracy = accuracy_score(online_batch_labels, online_main_batch_preds)
@@ -598,7 +595,7 @@ def train_model(**kwargs):
                             'online_class_recall': online_main_batch_recall,
                             'online_class_f1': online_main_batch_f1
                             }
-                        
+
                         online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
                         online_metrics_dict['mitigation_reward'] = mitigation_reward
 
@@ -621,8 +618,8 @@ def train_model(**kwargs):
                         logger.info(f"Sending visual evaluation results to wandber...")
                         metrics_reporter.report(visual_eval_dict)
 
-                    # Trigger HSJA evaluation in a background thread so it does
-                    # not block the training loop. Skip if already running.
+                    # Trigger HSJA evaluation in a background thread so it does not
+                    # block the training loop. Skipped if the previous run is ongoing.
                     if hsja_enabled and not _hsja_eval_running:
                         _hsja_eval_running = True
                         _hsja_eval_thread = threading.Thread(

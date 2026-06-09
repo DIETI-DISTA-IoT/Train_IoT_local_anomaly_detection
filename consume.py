@@ -9,7 +9,7 @@ import requests
 from preprocessing import Buffer
 from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import torch
 import string
 import random
@@ -36,6 +36,7 @@ epoch_accuracy= 0
 epoch_precision= 0
 epoch_recall= 0
 epoch_f1= 0
+epoch_macro_f1= 0
 
 average_param = 'binary'
 
@@ -96,6 +97,8 @@ def visual_evaluation(n=1000):
     adv_eval_precision = precision_score(y, preds, zero_division=0, average='weighted')
     adv_eval_recall = recall_score(y, preds, zero_division=0, average='weighted')
     adv_eval_f1 = f1_score(y, preds, zero_division=0, average='weighted')
+    adv_eval_macro_f1 = f1_score(y, preds, zero_division=0, average='macro')
+    adv_eval_cm = confusion_matrix(y, preds, labels=[0, 1, 2])
 
     X = feats - feats.mean(0, keepdim=True)
     U, S, V = torch.pca_lowrank(X, q=2)
@@ -109,7 +112,9 @@ def visual_evaluation(n=1000):
         'adv_eval_accuracy': adv_eval_accuracy,
         'adv_eval_precision': adv_eval_precision,
         'adv_eval_recall': adv_eval_recall,
-        'adv_eval_f1': adv_eval_f1
+        'adv_eval_f1': adv_eval_f1,
+        'adv_eval_macro_f1': adv_eval_macro_f1,
+        'adv_eval_confusion_matrix': encode_array(adv_eval_cm),
     }
 
 
@@ -176,6 +181,8 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
     adv_precision = precision_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
     adv_recall    = recall_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
     adv_f1        = f1_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
+    adv_macro_f1  = f1_score(all_labels_arr, adv_preds_arr, zero_division=0, average='macro')
+    adv_cm        = confusion_matrix(all_labels_arr, adv_preds_arr, labels=[0, 1, 2])
 
     # PCA of original (clean) feature space for the left panel
     X = all_feats - all_feats.mean(0, keepdim=True)
@@ -198,8 +205,10 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
         'hsja_adv_eval/precision':        adv_precision,
         'hsja_adv_eval/recall':           adv_recall,
         'hsja_adv_eval/f1':               adv_f1,
+        'hsja_adv_eval/macro_f1':         adv_macro_f1,
         'hsja_adv_eval/avg_perturbation': float(np.mean(pert_norms)),
         'hsja_adv_eval/avg_queries':      total_queries / max(len(all_feats), 1),
+        'hsja_adv_eval_confusion_matrix': encode_array(adv_cm),
     }
 
     logger.info(
@@ -507,7 +516,7 @@ def _run_hsja_evaluation_bg(**kwargs):
 def train_model(**kwargs):
     global brain, batch_counter, epoch_counter
     global epoch_loss
-    global epoch_accuracy, epoch_precision, epoch_recall, epoch_f1
+    global epoch_accuracy, epoch_precision, epoch_recall, epoch_f1, epoch_macro_f1
     global mitigation_reward, mitigation_times
     global online_batch_labels, online_main_batch_preds
     global lists_lock
@@ -552,12 +561,14 @@ def train_model(**kwargs):
             batch_precision = precision_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
             batch_recall = recall_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
             batch_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average='weighted')
+            batch_macro_f1 = f1_score(batch_main_labels, batch_main_preds, zero_division=0, average='macro')
 
             epoch_loss += batch_loss
             epoch_accuracy += batch_accuracy
             epoch_precision += batch_precision
             epoch_recall += batch_recall
             epoch_f1 += batch_f1
+            epoch_macro_f1 += batch_macro_f1
 
             if batch_counter % epoch_size == 0:
 
@@ -567,6 +578,7 @@ def train_model(**kwargs):
                 epoch_precision /= epoch_size
                 epoch_recall /= epoch_size
                 epoch_f1 /= epoch_size
+                epoch_macro_f1 /= epoch_size
 
                 metrics_dict = {
                     'total_loss': epoch_loss,
@@ -574,6 +586,7 @@ def train_model(**kwargs):
                     'class_precision': epoch_precision,
                     'class_recall': epoch_recall,
                     'class_f1': epoch_f1,
+                    'class_macro_f1': epoch_macro_f1,
                     'diagnostics_processed': diagnostics_processed,
                     'anoms_processed': anoms_processed,
                     'attacks_processed': attacks_processed,
@@ -588,12 +601,16 @@ def train_model(**kwargs):
                         online_main_batch_precision = precision_score(online_batch_labels, online_main_batch_preds, zero_division=0, average='weighted')
                         online_main_batch_recall = recall_score(online_batch_labels, online_main_batch_preds, zero_division=0, average='weighted')
                         online_main_batch_f1 = f1_score(online_batch_labels, online_main_batch_preds, zero_division=0, average='weighted')
+                        online_main_batch_macro_f1 = f1_score(online_batch_labels, online_main_batch_preds, zero_division=0, average='macro')
+                        online_cm = confusion_matrix(online_batch_labels, online_main_batch_preds, labels=[0, 1, 2])
 
                         online_metrics_dict = {
                             'online_class_accuracy': online_main_batch_accuracy,
                             'online_class_precision': online_main_batch_precision,
                             'online_class_recall': online_main_batch_recall,
-                            'online_class_f1': online_main_batch_f1
+                            'online_class_f1': online_main_batch_f1,
+                            'online_class_macro_f1': online_main_batch_macro_f1,
+                            'online_confusion_matrix': encode_array(online_cm),
                             }
 
                         online_metrics_dict['mitigation_time'] = np.array(mitigation_times).mean() if len(mitigation_times) > 0 else 0.0
@@ -607,7 +624,7 @@ def train_model(**kwargs):
                         mitigation_reward = 0
 
                 metrics_reporter.report(metrics_dict)
-                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = 0
+                epoch_loss = epoch_accuracy = epoch_precision = epoch_recall = epoch_f1 = epoch_macro_f1 = 0
 
                 if epoch_counter % save_model_freq_epochs == 0:
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')

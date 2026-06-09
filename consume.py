@@ -19,6 +19,7 @@ from threading import Lock
 from OpenFAIR.container_api import ContainerAPI
 from OpenFAIR import EventType
 import matplotlib.pyplot as plt
+from hopskipjump import hopskipjump_attack
 
 batch_counter = 0
 epoch_counter = 0
@@ -46,6 +47,10 @@ mitigation_reward = 0
 
 HOST_IP = os.getenv("HOST_IP")
 MANAGER_IP = None
+
+# Background HSJA evaluation state
+_hsja_eval_running = False
+_hsja_eval_thread = None
 
 columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata', 
                         'Posizione', 'Sistema', 'Componente', 'Timestamp segnale', 'Test']
@@ -106,6 +111,108 @@ def visual_evaluation(n=1000):
     'adv_eval_recall': adv_eval_recall,
     'adv_eval_f1': adv_eval_f1
     }
+
+
+def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
+    """
+    Run HopSkipJump attack on a small sample from each class buffer.
+
+    For each sample the attacker has only hard-label (decision) access to the
+    local classifier — matching a realistic black-box threat model.
+    Returns a dict with encoded arrays for a 3-panel manifold plot plus
+    scalar robustness metrics, or None if the buffers are not yet warm enough.
+
+    The '/'-separated scalar keys (e.g. 'hsja_adv_eval/accuracy') create a
+    dedicated W&B sub-section distinct from the Gaussian 'adv_eval_*' group.
+    """
+    global brain, _hsja_eval_running
+
+    diag_feats, diag_labels = diagnostics_buffer.sample(n_per_class)
+    anom_feats, anom_labels = eval_anomalies_buffer.sample(n_per_class)
+    atk_feats, atk_labels = eval_attacks_buffer.sample(n_per_class)
+
+    if len(diag_feats) < 5 or len(anom_feats) < 5 or len(atk_feats) < 5:
+        _hsja_eval_running = False
+        return None
+
+    all_feats = torch.vstack((diag_feats, anom_feats, atk_feats))
+    all_labels_t = torch.vstack((diag_labels, anom_labels, atk_labels))
+    all_labels_arr = all_labels_t.squeeze(1).numpy()  # shape (N,)
+
+    # predict_fn acquires model_lock for each individual query so lock
+    # contention with the training thread remains short and predictable.
+    def predict_fn(x: torch.Tensor) -> int:
+        brain.model.eval()
+        with brain.model_lock, torch.no_grad():
+            logits, _ = brain.model(x.unsqueeze(0))
+            return logits.argmax(dim=-1).item()
+
+    adv_examples = []
+    adv_preds = []
+    pert_norms = []
+    total_queries = 0
+
+    for i in range(len(all_feats)):
+        if stop_threads:
+            _hsja_eval_running = False
+            return None
+        x = all_feats[i]
+        y_i = int(all_labels_arr[i])
+        x_adv, n_q = hopskipjump_attack(
+            predict_fn, x, y_i,
+            n_steps=n_steps,
+            n_grad_samples=n_grad_samples,
+        )
+        total_queries += n_q
+        pert_norms.append(float(torch.norm(x_adv - x)))
+        adv_examples.append(x_adv)
+        # Record what the model predicts on the adversarial example
+        with brain.model_lock, torch.no_grad():
+            brain.model.eval()
+            adv_logits, _ = brain.model(x_adv.unsqueeze(0))
+            adv_preds.append(adv_logits.argmax(dim=-1).item())
+
+    adv_preds_arr = np.array(adv_preds)
+
+    adv_accuracy  = accuracy_score(all_labels_arr, adv_preds_arr)
+    adv_precision = precision_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
+    adv_recall    = recall_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
+    adv_f1        = f1_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
+
+    # PCA of original (clean) feature space for the left panel
+    X = all_feats - all_feats.mean(0, keepdim=True)
+    _, _, V = torch.pca_lowrank(X, q=2)
+    X2 = (X @ V[:, :2]).numpy()
+
+    # Manifold coordinates of the adversarial examples for the centre/right panels
+    adv_stack = torch.stack(adv_examples)
+    with brain.model_lock, torch.no_grad():
+        brain.model.eval()
+        _, adv_manifold = brain.model(adv_stack)
+    adv_manifold = adv_manifold.numpy()
+
+    result = {
+        'hsja_visual_eval_X':        encode_array(X2),
+        'hsja_visual_eval_y':        encode_array(all_labels_arr),
+        'hsja_visual_eval_preds':    encode_array(adv_preds_arr),
+        'hsja_visual_eval_manifold': encode_array(adv_manifold),
+        # '/' prefix groups these in a dedicated W&B section
+        'hsja_adv_eval/accuracy':         adv_accuracy,
+        'hsja_adv_eval/precision':        adv_precision,
+        'hsja_adv_eval/recall':           adv_recall,
+        'hsja_adv_eval/f1':               adv_f1,
+        'hsja_adv_eval/avg_perturbation': float(np.mean(pert_norms)),
+        'hsja_adv_eval/avg_queries':      total_queries / max(len(all_feats), 1),
+    }
+
+    logger.info(
+        f"HSJA eval done — accuracy={adv_accuracy:.3f}, "
+        f"avg_perturbation={result['hsja_adv_eval/avg_perturbation']:.4f}, "
+        f"avg_queries={result['hsja_adv_eval/avg_queries']:.0f}"
+    )
+
+    metrics_reporter.report(result)
+    _hsja_eval_running = False
 
 
 def plot_results(Y, all_preds, pca_embed, manifold, task_name):
@@ -199,7 +306,7 @@ def delete_owned_topics():
 
 def deserialize_message(msg):
     try:
-        message_value = json.loads(msg.value().decode('utf-8'))
+tml_value = json.loads(msg.value().decode('utf-8'))
         logger.debug(f"received message from topic [{msg.topic()}]")
         return message_value
     except json.JSONDecodeError as e:
@@ -386,6 +493,20 @@ def pull_weights(**kwargs):
             logger.info("Local weights updated using global model.")
 
 
+def _run_hsja_evaluation_bg(**kwargs):
+    """Background thread target: run HSJA evaluation and clear the running flag."""
+    global _hsja_eval_running
+    try:
+        hsja_evaluation(
+            n_per_class=kwargs.get('hsja_n_per_class', 10),
+            n_steps=kwargs.get('hsja_n_steps', 30),
+            n_grad_samples=kwargs.get('hsja_n_grad_samples', 30),
+        )
+    except Exception as e:
+        logger.error(f"HSJA evaluation raised an exception: {e}")
+        _hsja_eval_running = False
+
+
 def train_model(**kwargs):
     global brain, batch_counter, epoch_counter
     global epoch_loss
@@ -395,11 +516,13 @@ def train_model(**kwargs):
     global lists_lock
     global anoms_processed, diagnostics_processed, attacks_processed, records_processed
     global eval_anomalies_processed, eval_attacks_processed
+    global _hsja_eval_running, _hsja_eval_thread
     lists_lock = Lock()
 
     batch_size = kwargs.get('batch_size', 32)
     epoch_size = kwargs.get('epoch_size', 50)
     save_model_freq_epochs = kwargs.get('save_model_freq_epochs', 10)
+    hsja_enabled = kwargs.get('hsja_enabled', True)
 
     while not stop_threads:
         batch_feats = None
@@ -497,6 +620,20 @@ def train_model(**kwargs):
                     if visual_eval_dict is not None:
                         logger.info(f"Sending visual evaluation results to wandber...")
                         metrics_reporter.report(visual_eval_dict)
+
+                    # Trigger HSJA evaluation in a background thread so it does
+                    # not block the training loop. Skip if already running.
+                    if hsja_enabled and not _hsja_eval_running:
+                        _hsja_eval_running = True
+                        _hsja_eval_thread = threading.Thread(
+                            target=_run_hsja_evaluation_bg,
+                            kwargs=kwargs,
+                            daemon=True
+                        )
+                        _hsja_eval_thread.start()
+                        logger.info("HSJA evaluation thread started.")
+                    elif hsja_enabled and _hsja_eval_running:
+                        logger.debug("HSJA evaluation still running, skipping this trigger.")
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

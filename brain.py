@@ -1,4 +1,4 @@
-from modules import MLP, CNN1D
+from modules import MLP, CNN1D, TabResNet
 import torch.optim as optim
 import torch.nn as nn
 import torch
@@ -19,6 +19,8 @@ class Brain:
         model_type = str(kwargs.get('model_type', 'mlp')).lower()
         if model_type == 'cnn':
             self.model = CNN1D(**kwargs)
+        elif model_type == 'resnet':
+            self.model = TabResNet(**kwargs)
         else:
             self.model = MLP(**kwargs)
         

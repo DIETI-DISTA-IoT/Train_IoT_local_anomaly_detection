@@ -685,6 +685,34 @@ def start_consumer_runtime(args_namespace):
     global eval_attacks_buffer, eval_anomalies_buffer, adversarial_training
     global resubscribe_interval_seconds, epoch_batches
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
+    global batch_counter, epoch_counter, records_processed, attacks_processed, anoms_processed
+    global diagnostics_processed, eval_anomalies_processed, eval_attacks_processed
+    global epoch_loss, epoch_accuracy, epoch_precision, epoch_recall, epoch_f1, epoch_macro_f1
+    global online_batch_labels, online_main_batch_preds, mitigation_times, mitigation_reward
+    global _hsja_eval_running, _hsja_eval_thread
+
+    # Reset all per-run accumulators so each run (within a reused container)
+    # starts from a clean slate, matching the fresh W&B run's step 0.
+    batch_counter = 0
+    epoch_counter = 0
+    records_processed = 0
+    attacks_processed = 0
+    anoms_processed = 0
+    diagnostics_processed = 0
+    eval_anomalies_processed = 0
+    eval_attacks_processed = 0
+    epoch_loss = 0
+    epoch_accuracy = 0
+    epoch_precision = 0
+    epoch_recall = 0
+    epoch_f1 = 0
+    epoch_macro_f1 = 0
+    online_batch_labels = []
+    online_main_batch_preds = []
+    mitigation_times = []
+    mitigation_reward = 0
+    _hsja_eval_running = False
+    _hsja_eval_thread = None
 
     args = args_namespace
 

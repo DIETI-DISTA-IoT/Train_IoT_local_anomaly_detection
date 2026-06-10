@@ -53,6 +53,10 @@ MANAGER_IP = None
 _hsja_eval_running = False
 _hsja_eval_thread = None
 
+# Counts how many times the adversarial benchmarks (Gaussian-noise eval + HSJA)
+# have run, used to decide when to additionally send plots/confusion matrices.
+benchmark_eval_counter = 0
+
 columns_to_delete = ['Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata',
                         'Posizione', 'Sistema', 'Componente', 'Timestamp segnale', 'Test']
 
@@ -74,7 +78,7 @@ def thread_safe_lock(lock):
     return decorator
 
 
-def visual_evaluation(n=1000):
+def visual_evaluation(n=1000, include_plots=True):
     global brain
     diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(n // 3)
     anomalies_feats, anom_main_labels = eval_anomalies_buffer.sample(n // 3)
@@ -98,27 +102,34 @@ def visual_evaluation(n=1000):
     adv_eval_recall = recall_score(y, preds, zero_division=0, average='weighted')
     adv_eval_f1 = f1_score(y, preds, zero_division=0, average='weighted')
     adv_eval_macro_f1 = f1_score(y, preds, zero_division=0, average='macro')
-    adv_eval_cm = confusion_matrix(y, preds, labels=[0, 1, 2])
 
-    X = feats - feats.mean(0, keepdim=True)
-    U, S, V = torch.pca_lowrank(X, q=2)
-    X2 = X @ V[:, :2]
-
-    return {
-        'visual_eval_X': encode_array(X2.numpy()),
-        'visual_eval_y': encode_array(y),
-        'visual_eval_preds': encode_array(preds),
-        'visual_eval_manifold': encode_array(manifold.numpy()),
+    result = {
         'adv_eval_accuracy': adv_eval_accuracy,
         'adv_eval_precision': adv_eval_precision,
         'adv_eval_recall': adv_eval_recall,
         'adv_eval_f1': adv_eval_f1,
         'adv_eval_macro_f1': adv_eval_macro_f1,
-        'adv_eval_confusion_matrix': encode_array(adv_eval_cm),
     }
 
+    if include_plots:
+        adv_eval_cm = confusion_matrix(y, preds, labels=[0, 1, 2])
 
-def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
+        X = feats - feats.mean(0, keepdim=True)
+        U, S, V = torch.pca_lowrank(X, q=2)
+        X2 = X @ V[:, :2]
+
+        result.update({
+            'visual_eval_X': encode_array(X2.numpy()),
+            'visual_eval_y': encode_array(y),
+            'visual_eval_preds': encode_array(preds),
+            'visual_eval_manifold': encode_array(manifold.numpy()),
+            'adv_eval_confusion_matrix': encode_array(adv_eval_cm),
+        })
+
+    return result
+
+
+def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True):
     """
     Run HopSkipJump attack on a small sample from each class buffer.
 
@@ -182,25 +193,8 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
     adv_recall    = recall_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
     adv_f1        = f1_score(all_labels_arr, adv_preds_arr, zero_division=0, average='weighted')
     adv_macro_f1  = f1_score(all_labels_arr, adv_preds_arr, zero_division=0, average='macro')
-    adv_cm        = confusion_matrix(all_labels_arr, adv_preds_arr, labels=[0, 1, 2])
-
-    # PCA of original (clean) feature space for the left panel
-    X = all_feats - all_feats.mean(0, keepdim=True)
-    _, _, V = torch.pca_lowrank(X, q=2)
-    X2 = (X @ V[:, :2]).numpy()
-
-    # Manifold coordinates of adversarial examples for the centre/right panels
-    adv_stack = torch.stack(adv_examples)
-    with brain.model_lock, torch.no_grad():
-        brain.model.eval()
-        _, adv_manifold = brain.model(adv_stack)
-    adv_manifold = adv_manifold.numpy()
 
     result = {
-        'hsja_visual_eval_X':        encode_array(X2),
-        'hsja_visual_eval_y':        encode_array(all_labels_arr),
-        'hsja_visual_eval_preds':    encode_array(adv_preds_arr),
-        'hsja_visual_eval_manifold': encode_array(adv_manifold),
         'hsja_adv_eval/accuracy':         adv_accuracy,
         'hsja_adv_eval/precision':        adv_precision,
         'hsja_adv_eval/recall':           adv_recall,
@@ -208,8 +202,30 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30):
         'hsja_adv_eval/macro_f1':         adv_macro_f1,
         'hsja_adv_eval/avg_perturbation': float(np.mean(pert_norms)),
         'hsja_adv_eval/avg_queries':      total_queries / max(len(all_feats), 1),
-        'hsja_adv_eval_confusion_matrix': encode_array(adv_cm),
     }
+
+    if include_plots:
+        adv_cm = confusion_matrix(all_labels_arr, adv_preds_arr, labels=[0, 1, 2])
+
+        # PCA of original (clean) feature space for the left panel
+        X = all_feats - all_feats.mean(0, keepdim=True)
+        _, _, V = torch.pca_lowrank(X, q=2)
+        X2 = (X @ V[:, :2]).numpy()
+
+        # Manifold coordinates of adversarial examples for the centre/right panels
+        adv_stack = torch.stack(adv_examples)
+        with brain.model_lock, torch.no_grad():
+            brain.model.eval()
+            _, adv_manifold = brain.model(adv_stack)
+        adv_manifold = adv_manifold.numpy()
+
+        result.update({
+            'hsja_visual_eval_X':        encode_array(X2),
+            'hsja_visual_eval_y':        encode_array(all_labels_arr),
+            'hsja_visual_eval_preds':    encode_array(adv_preds_arr),
+            'hsja_visual_eval_manifold': encode_array(adv_manifold),
+            'hsja_adv_eval_confusion_matrix': encode_array(adv_cm),
+        })
 
     logger.info(
         f"HSJA eval done — accuracy={adv_accuracy:.3f}, "
@@ -507,6 +523,7 @@ def _run_hsja_evaluation_bg(**kwargs):
             n_per_class=kwargs.get('hsja_n_per_class', 10),
             n_steps=kwargs.get('hsja_n_steps', 30),
             n_grad_samples=kwargs.get('hsja_n_grad_samples', 30),
+            include_plots=kwargs.get('include_plots', True),
         )
     except Exception as e:
         logger.error(f"HSJA evaluation raised an exception: {e}")
@@ -523,11 +540,14 @@ def train_model(**kwargs):
     global anoms_processed, diagnostics_processed, attacks_processed, records_processed
     global eval_anomalies_processed, eval_attacks_processed
     global _hsja_eval_running, _hsja_eval_thread
+    global benchmark_eval_counter
     lists_lock = Lock()
 
     batch_size = kwargs.get('batch_size', 32)
     epoch_size = kwargs.get('epoch_size', 50)
     save_model_freq_epochs = kwargs.get('save_model_freq_epochs', 10)
+    run_benchmarks_freq_epochs = kwargs.get('run_benchmarks_freq_epochs', save_model_freq_epochs)
+    plot_creation_freq_benchmarks = kwargs.get('plot_creation_freq_benchmarks', 3)
     hsja_enabled = kwargs.get('hsja_enabled', True)
 
     while not stop_threads:
@@ -630,9 +650,14 @@ def train_model(**kwargs):
                     model_path = kwargs.get('model_saving_path', 'default_model.pth')
                     logger.info(f"Saving model after {epoch_counter} epochs as {model_path}.")
                     brain.save_model()
-                    visual_eval_dict = visual_evaluation()
+
+                if epoch_counter % run_benchmarks_freq_epochs == 0:
+                    benchmark_eval_counter += 1
+                    include_plots = (benchmark_eval_counter % plot_creation_freq_benchmarks == 0)
+
+                    visual_eval_dict = visual_evaluation(include_plots=include_plots)
                     if visual_eval_dict is not None:
-                        logger.info(f"Sending visual evaluation results to wandber...")
+                        logger.info(f"Sending visual evaluation results to wandber (plots={include_plots})...")
                         metrics_reporter.report(visual_eval_dict)
 
                     # Trigger HSJA evaluation in a background thread so it does not
@@ -641,7 +666,7 @@ def train_model(**kwargs):
                         _hsja_eval_running = True
                         _hsja_eval_thread = threading.Thread(
                             target=_run_hsja_evaluation_bg,
-                            kwargs=kwargs,
+                            kwargs={**kwargs, 'include_plots': include_plots},
                             daemon=True
                         )
                         _hsja_eval_thread.start()

@@ -1,4 +1,4 @@
-from modules import MLP
+from modules import MLP, CNN1D, TabResNet
 import torch.optim as optim
 import torch.nn as nn
 import torch
@@ -16,7 +16,13 @@ class Brain:
                 torch.backends.cudnn.deterministic = True
                 torch.backends.cudnn.benchmark = False
 
-        self.model = MLP(**kwargs)
+        model_type = str(kwargs.get('model_type', 'mlp')).lower()
+        if model_type == 'cnn':
+            self.model = CNN1D(**kwargs)
+        elif model_type == 'resnet':
+            self.model = TabResNet(**kwargs)
+        else:
+            self.model = MLP(**kwargs)
         
         init_strategy = kwargs.get('initialization_strategy', None)
         if init_strategy == 'xavier':

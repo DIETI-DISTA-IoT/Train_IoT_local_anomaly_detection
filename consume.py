@@ -21,6 +21,16 @@ from OpenFAIR import EventType
 import matplotlib.pyplot as plt
 from hopskipjump import hopskipjump_attack
 
+# Indices, within the 40-dim feature vector produced by
+# OpenFAIR.train_simulator.Train.step(), of usBpPres and usMpPres (the brake
+# pipe and main reservoir pressures, components 1-2). HSJA is restricted to
+# perturbing these two features, matching the threat model of the
+# Gaussian-noise adversarial stress test (Mp_std/Bp_std in
+# train_simulator.generate_hydraulics, which only perturb these two scalars)
+# and avoiding the categorical/status/GPS features whose model-input scale
+# is incompatible with HSJA's continuous perturbations.
+HSJA_PRESSURE_FEATURE_INDICES = [32, 33]
+
 batch_counter = 0
 epoch_counter = 0
 records_processed = 0
@@ -177,6 +187,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
             predict_fn, x, y_i,
             n_steps=n_steps,
             n_grad_samples=n_grad_samples,
+            feature_indices=HSJA_PRESSURE_FEATURE_INDICES,
         )
         total_queries += n_q
         pert_norms.append(float(torch.norm(x_adv - x)))

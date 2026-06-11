@@ -1,5 +1,5 @@
 import torch
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 
 def hopskipjump_attack(
@@ -12,6 +12,7 @@ def hopskipjump_attack(
     init_noise_scale: float = 3.0,
     clip_min: Optional[float] = None,
     clip_max: Optional[float] = None,
+    feature_indices: Optional[Sequence[int]] = None,
 ) -> Tuple[torch.Tensor, int]:
     """
     HopSkipJump Attack (Chen et al., 2020) — decision-based black-box attack.
@@ -35,6 +36,12 @@ def hopskipjump_attack(
         init_noise_scale:  std of Gaussian noise used during initialisation.
         clip_min/clip_max: optional per-feature clipping for physical
                            plausibility (e.g. clip_min=0.0 for pressures).
+        feature_indices:   optional subset of feature indices the attack is
+                           allowed to perturb. All other coordinates of
+                           x_orig are left untouched throughout the attack
+                           (random init noise, gradient-probe directions and
+                           steps are zeroed outside this subset). If None,
+                           all features are perturbable.
 
     Returns:
         (x_adv, n_queries): adversarial tensor and total query count.
@@ -47,10 +54,22 @@ def hopskipjump_attack(
             return torch.clamp(x, min=clip_min, max=clip_max)
         return x
 
+    if feature_indices is not None:
+        mask = torch.zeros_like(x_orig)
+        mask[list(feature_indices)] = 1.0
+    else:
+        mask = None
+
+    def _masked_randn() -> torch.Tensor:
+        noise = torch.randn_like(x_orig)
+        if mask is not None:
+            noise = noise * mask
+        return noise
+
     # ── Phase 1: find initial adversarial starting point ──────────────────
     x_adv = None
     for _ in range(n_init_trials):
-        x_candidate = _clip(x_orig + torch.randn_like(x_orig) * init_noise_scale)
+        x_candidate = _clip(x_orig + _masked_randn() * init_noise_scale)
         n_queries += 1
         if predict_fn(x_candidate) != y_orig:
             x_adv = x_candidate.clone()
@@ -80,11 +99,12 @@ def hopskipjump_attack(
             break
         # Step size for random perturbation scales with distance and
         # dimensionality so probes stay near the boundary.
-        delta = dist / float(x_orig.numel() ** 0.5)
+        n_dims = float(mask.sum().item()) if mask is not None else float(x_orig.numel())
+        delta = dist / (n_dims ** 0.5)
 
         grad_est = torch.zeros_like(x_orig)
         for _ in range(n_grad_samples):
-            u = torch.randn_like(x_orig)
+            u = _masked_randn()
             u = u / (u.norm() + 1e-12)
             x_probe = _clip(x_adv + delta * u)
             n_queries += 1

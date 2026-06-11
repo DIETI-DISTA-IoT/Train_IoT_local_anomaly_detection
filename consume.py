@@ -22,14 +22,14 @@ import matplotlib.pyplot as plt
 from hopskipjump import hopskipjump_attack
 
 # Indices, within the 40-dim feature vector produced by
-# OpenFAIR.train_simulator.Train.step(), of the 18 brake-pressure sensors
-# (the "hydraulics" block: usB1BCilPres_*, usB2BCilPres_*, usBpPres,
-# usMpPres). HSJA is restricted to perturbing these features, matching the
-# threat model of the Gaussian-noise adversarial stress test (which only
-# perturbs the main-reservoir/brake-pipe pressures, components 1-2) and
-# avoiding the categorical/status/GPS features whose model-input scale is
-# incompatible with HSJA's continuous perturbations.
-HSJA_PRESSURE_FEATURE_INDICES = list(range(16, 34))
+# OpenFAIR.train_simulator.Train.step(), of usBpPres and usMpPres (the brake
+# pipe and main reservoir pressures, components 1-2). HSJA is restricted to
+# perturbing these two features, matching the threat model of the
+# Gaussian-noise adversarial stress test (Mp_std/Bp_std in
+# train_simulator.generate_hydraulics, which only perturb these two scalars)
+# and avoiding the categorical/status/GPS features whose model-input scale
+# is incompatible with HSJA's continuous perturbations.
+HSJA_PRESSURE_FEATURE_INDICES = [32, 33]
 
 batch_counter = 0
 epoch_counter = 0

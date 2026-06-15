@@ -23,12 +23,11 @@ from hopskipjump import hopskipjump_attack
 
 # Indices, within the 40-dim feature vector produced by
 # OpenFAIR.train_simulator.Train.step(), of usBpPres and usMpPres (the brake
-# pipe and main reservoir pressures, components 1-2). HSJA is restricted to
-# perturbing these two features, matching the threat model of the
+# pipe and main reservoir pressures, components 1-2). Opt-in subset (via the
+# 'hsja_feature_indices' config kwarg) matching the threat model of the
 # Gaussian-noise adversarial stress test (Mp_std/Bp_std in
-# train_simulator.generate_hydraulics, which only perturb these two scalars)
-# and avoiding the categorical/status/GPS features whose model-input scale
-# is incompatible with HSJA's continuous perturbations.
+# train_simulator.generate_hydraulics, which only perturb these two scalars).
+# Default HSJA behaviour (feature_indices=None) perturbs the whole vector.
 HSJA_PRESSURE_FEATURE_INDICES = [32, 33]
 
 batch_counter = 0
@@ -139,7 +138,7 @@ def visual_evaluation(n=1000, include_plots=True):
     return result
 
 
-def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True):
+def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True, feature_indices=None):
     """
     Run HopSkipJump attack on a small sample from each class buffer.
 
@@ -187,7 +186,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
             predict_fn, x, y_i,
             n_steps=n_steps,
             n_grad_samples=n_grad_samples,
-            feature_indices=HSJA_PRESSURE_FEATURE_INDICES,
+            feature_indices=feature_indices,
         )
         total_queries += n_q
         pert_norms.append(float(torch.norm(x_adv - x)))
@@ -535,6 +534,7 @@ def _run_hsja_evaluation_bg(**kwargs):
             n_steps=kwargs.get('hsja_n_steps', 30),
             n_grad_samples=kwargs.get('hsja_n_grad_samples', 30),
             include_plots=kwargs.get('include_plots', True),
+            feature_indices=kwargs.get('hsja_feature_indices', None),
         )
     except Exception as e:
         logger.error(f"HSJA evaluation raised an exception: {e}")

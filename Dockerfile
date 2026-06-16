@@ -46,9 +46,15 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Used by:  make build-consumer-scache-nolib
 ARG CODE_BUST=1
 
+# Branch of this application repo to clone. Defaults to sereBench (the platform
+# branch). Override to test a feature branch without merging, e.g.:
+#   docker build --build-arg CODE_BRANCH=claude/my-feature \
+#                --build-arg CODE_BUST=$(date +%s) ...
+ARG CODE_BRANCH=sereBench
+
 WORKDIR /consumer
 
-RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
+RUN git clone --branch ${CODE_BRANCH} https://github.com/DIETI-DISTA-IoT/Train_IoT_local_anomaly_detection.git .
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 
 EXPOSE 5000

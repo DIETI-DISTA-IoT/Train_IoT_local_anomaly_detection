@@ -138,7 +138,63 @@ def visual_evaluation(n=1000, include_plots=True):
     return result
 
 
-def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True, feature_indices=None):
+def sigma_grid_evaluation(sigmas, n=300):
+    """Decoupled Gaussian robustness evaluation on a fixed sigma-grid.
+
+    Unlike ``visual_evaluation`` (which reads the producer's adversarial eval
+    stream, whose noise level equals the vehicle's training-augmentation knob
+    Mp_std/Bp_std), this evaluation samples the CLEAN observation buffers and
+    injects zero-mean Gaussian noise of std=sigma into the two brake-pressure
+    features (usBpPres/usMpPres) of the ANOMALY and ATTACK samples for each
+    sigma in ``sigmas``. Normal samples are left clean, matching the
+    Mp_std/Bp_std threat model.
+
+    Because the grid is a fixed configuration constant and the source samples
+    are clean, the eval target is fully decoupled from how the model was
+    trained and is identical across the whole fleet by construction — which is
+    exactly what the ET2/ET3 comparisons require. Results are logged under
+    ``adv_eval/sigma_<s>/*`` so each sigma forms its own W&B sub-section.
+
+    Returns None if the clean buffers are not yet warm enough.
+    """
+    global brain
+    per_class = max(n // 3, 1)
+    diag_feats, diag_labels = diagnostics_buffer.sample(per_class)
+    anom_feats, anom_labels = anomalies_buffer.sample(per_class)
+    atk_feats, atk_labels = attacks_buffer.sample(per_class)
+
+    if len(diag_feats) < 10 or len(anom_feats) < 10 or len(atk_feats) < 10:
+        return None
+
+    # Only anomaly/attack pressures are perturbed; normal samples stay clean.
+    pert_feats = torch.vstack((anom_feats, atk_feats))
+    y = torch.vstack((diag_labels, anom_labels, atk_labels)).numpy().ravel()
+
+    result = {}
+    for sigma in sigmas:
+        sigma = float(sigma)
+        noisy = pert_feats.clone()
+        noise = torch.randn(noisy.shape[0], len(HSJA_PRESSURE_FEATURE_INDICES)) * sigma
+        noisy[:, HSJA_PRESSURE_FEATURE_INDICES] += noise
+        feats = torch.vstack((diag_feats, noisy))
+
+        brain.model.eval()
+        with brain.model_lock, torch.no_grad():
+            preds, _ = brain.model(feats)
+            preds = preds.argmax(dim=1).numpy()
+
+        tag = f"{sigma:g}".replace('.', '_')
+        result[f'adv_eval/sigma_{tag}/accuracy']  = accuracy_score(y, preds)
+        result[f'adv_eval/sigma_{tag}/precision'] = precision_score(y, preds, zero_division=0, average='weighted')
+        result[f'adv_eval/sigma_{tag}/recall']    = recall_score(y, preds, zero_division=0, average='weighted')
+        result[f'adv_eval/sigma_{tag}/f1']        = f1_score(y, preds, zero_division=0, average='weighted')
+        result[f'adv_eval/sigma_{tag}/macro_f1']  = f1_score(y, preds, zero_division=0, average='macro')
+
+    return result
+
+
+def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True,
+                    feature_indices=None, clean_anchors=True):
     """
     Run HopSkipJump attack on a small sample from each class buffer.
 
@@ -152,9 +208,18 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     """
     global brain, _hsja_eval_running
 
+    # With clean_anchors=True the attack starts from clean samples for every
+    # vehicle, so HSJA measures the model's decision boundary rather than the
+    # noise level baked into each vehicle's producer eval stream. This makes
+    # avg_perturbation / avg_queries directly comparable across the fleet
+    # (the default, decoupled behaviour). Set clean_anchors=False to recover
+    # the legacy behaviour of attacking the noisy producer eval stream.
+    anom_buf = anomalies_buffer if clean_anchors else eval_anomalies_buffer
+    atk_buf = attacks_buffer if clean_anchors else eval_attacks_buffer
+
     diag_feats, diag_labels = diagnostics_buffer.sample(n_per_class)
-    anom_feats, anom_labels = eval_anomalies_buffer.sample(n_per_class)
-    atk_feats, atk_labels = eval_attacks_buffer.sample(n_per_class)
+    anom_feats, anom_labels = anom_buf.sample(n_per_class)
+    atk_feats, atk_labels = atk_buf.sample(n_per_class)
 
     if len(diag_feats) < 5 or len(anom_feats) < 5 or len(atk_feats) < 5:
         _hsja_eval_running = False
@@ -535,6 +600,7 @@ def _run_hsja_evaluation_bg(**kwargs):
             n_grad_samples=kwargs.get('hsja_n_grad_samples', 30),
             include_plots=kwargs.get('include_plots', True),
             feature_indices=kwargs.get('hsja_feature_indices', None),
+            clean_anchors=kwargs.get('hsja_clean_anchors', True),
         )
     except Exception as e:
         logger.error(f"HSJA evaluation raised an exception: {e}")
@@ -560,6 +626,7 @@ def train_model(**kwargs):
     run_benchmarks_freq_epochs = kwargs.get('run_benchmarks_freq_epochs', save_model_freq_epochs)
     plot_creation_freq_benchmarks = kwargs.get('plot_creation_freq_benchmarks', 3)
     hsja_enabled = kwargs.get('hsja_enabled', True)
+    eval_sigmas = kwargs.get('eval_sigmas', [0.5, 1.0, 1.5, 2.0])
 
     while not stop_threads:
         batch_feats = None
@@ -670,6 +737,13 @@ def train_model(**kwargs):
                     if visual_eval_dict is not None:
                         logger.info(f"Sending visual evaluation results to wandber (plots={include_plots})...")
                         metrics_reporter.report(visual_eval_dict)
+
+                    # Decoupled, fleet-identical Gaussian robustness curve.
+                    if eval_sigmas:
+                        sigma_eval_dict = sigma_grid_evaluation(eval_sigmas)
+                        if sigma_eval_dict is not None:
+                            logger.info(f"Sending sigma-grid evaluation results to wandber (sigmas={eval_sigmas})...")
+                            metrics_reporter.report(sigma_eval_dict)
 
                     # Trigger HSJA evaluation in a background thread so it does not
                     # block the training loop. Skipped if the previous run is ongoing.

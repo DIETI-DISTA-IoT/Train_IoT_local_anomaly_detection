@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME=""
 ENV CONTAINER_NAME="generic_consumer"
-
+ENV TORCH_CPP_LOG_LEVEL=ERROR
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 

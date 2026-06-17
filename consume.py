@@ -11,6 +11,7 @@ from brain import Brain
 from communication import MetricsReporter, WeightsReporter, WeightsPuller
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import torch
+torch.backends.nnpack.enabled = False
 import string
 import random
 import os

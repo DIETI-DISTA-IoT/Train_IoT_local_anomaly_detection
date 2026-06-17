@@ -1,7 +1,10 @@
 from modules import MLP, CNN1D, TabResNet
+import torch
 import torch.optim as optim
 import torch.nn as nn
-import torch
+torch.backends.mkldnn.enabled = False
+torch.backends.nnpack.enabled = False
+
 from threading import Lock
 
 class Brain:

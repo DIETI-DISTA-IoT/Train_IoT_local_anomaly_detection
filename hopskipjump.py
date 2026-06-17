@@ -1,4 +1,6 @@
 import torch
+torch.backends.mkldnn.enabled = False
+torch.backends.nnpack.enabled = False
 from typing import Callable, Optional, Sequence, Tuple
 
 

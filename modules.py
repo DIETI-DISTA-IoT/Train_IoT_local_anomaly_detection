@@ -1,5 +1,7 @@
 import torch.nn as nn
 import torch
+torch.backends.mkldnn.enabled = False
+torch.backends.nnpack.enabled = False
 
 class MLP(nn.Module):
     def __init__(self, **kwargs):

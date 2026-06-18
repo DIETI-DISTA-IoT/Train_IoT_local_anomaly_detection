@@ -210,6 +210,13 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     """
     global brain, _hsja_eval_running
 
+    logger.info(
+        f"HSJA eval round STARTING — n_per_class={n_per_class}, n_steps={n_steps}, "
+        f"n_grad_samples={n_grad_samples}, include_plots={include_plots}, "
+        f"clean_anchors={clean_anchors}, "
+        f"feature_indices={'all' if feature_indices is None else feature_indices}."
+    )
+
     # With clean_anchors=True the attack starts from clean samples for every
     # vehicle, so HSJA measures the model's decision boundary rather than the
     # noise level baked into each vehicle's producer eval stream. This makes
@@ -224,6 +231,15 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     atk_feats, atk_labels = atk_buf.sample(n_per_class)
 
     if len(diag_feats) < 5 or len(anom_feats) < 5 or len(atk_feats) < 5:
+        # Silent omission guard: the round was triggered but cannot run because
+        # one or more class buffers are not warm enough yet. Make it explicit so
+        # missing HSJA rounds are not mistaken for a crash.
+        logger.warning(
+            f"HSJA eval round OMITTED — buffers not warm enough "
+            f"(need >=5 each; have diagnostics={len(diag_feats)}, "
+            f"anomalies={len(anom_feats)}, attacks={len(atk_feats)}). "
+            f"Will retry on the next benchmark trigger."
+        )
         _hsja_eval_running = False
         return
 
@@ -245,6 +261,10 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
 
     for i in range(len(all_feats)):
         if stop_threads:
+            logger.warning(
+                f"HSJA eval round ABORTED — shutdown requested mid-evaluation "
+                f"(processed {i}/{len(all_feats)} samples)."
+            )
             _hsja_eval_running = False
             return
         x = all_feats[i]
@@ -605,8 +625,12 @@ def _run_hsja_evaluation_bg(**kwargs):
             clean_anchors=kwargs.get('hsja_clean_anchors', True),
         )
     except Exception as e:
-        logger.error(f"HSJA evaluation raised an exception: {e}")
+        logger.error(f"HSJA evaluation raised an exception: {e}", exc_info=True)
         _hsja_eval_running = False
+    finally:
+        # Always confirm the background thread has exited, regardless of whether
+        # the round completed, was omitted (cold buffers), aborted, or errored.
+        logger.info("HSJA evaluation background thread exiting.")
 
 
 def train_model(**kwargs):
@@ -757,9 +781,25 @@ def train_model(**kwargs):
                             daemon=True
                         )
                         _hsja_eval_thread.start()
-                        logger.info("HSJA evaluation thread started.")
+                        logger.info(
+                            f"HSJA evaluation thread started "
+                            f"(benchmark round {benchmark_eval_counter}, epoch {epoch_counter})."
+                        )
                     elif hsja_enabled and _hsja_eval_running:
-                        logger.debug("HSJA evaluation still running, skipping this trigger.")
+                        # The previous round has not finished yet, so this trigger
+                        # is skipped. Logged at WARNING so repeated/overlapping
+                        # omissions are visible rather than silently dropped.
+                        logger.warning(
+                            f"HSJA evaluation OMITTED for benchmark round "
+                            f"{benchmark_eval_counter} (epoch {epoch_counter}): "
+                            f"previous round still running."
+                        )
+                    elif not hsja_enabled:
+                        logger.info(
+                            f"HSJA evaluation OMITTED for benchmark round "
+                            f"{benchmark_eval_counter} (epoch {epoch_counter}): "
+                            f"disabled by config (hsja_enabled=False)."
+                        )
 
         time.sleep(kwargs.get('training_freq_seconds', 1))
 

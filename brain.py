@@ -2,7 +2,7 @@ from modules import MLP, CNN1D, TabResNet
 import torch
 import torch.optim as optim
 import torch.nn as nn
-torch.backends.mkldnn.enabled = False
+torch.backends.mkldnn.enabled = True
 torch.backends.nnpack.enabled = False
 
 import logging

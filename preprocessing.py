@@ -1,6 +1,6 @@
 import random
 import torch
-torch.backends.mkldnn.enabled = False
+torch.backends.mkldnn.enabled = True
 torch.backends.nnpack.enabled = False
 import numpy as np
 from threading import Lock

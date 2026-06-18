@@ -1,7 +1,10 @@
 import torch
 torch.backends.mkldnn.enabled = False
 torch.backends.nnpack.enabled = False
-from typing import Callable, Optional, Sequence, Tuple
+import logging
+from typing import Callable, List, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def hopskipjump_attack(
@@ -15,6 +18,7 @@ def hopskipjump_attack(
     clip_min: Optional[float] = None,
     clip_max: Optional[float] = None,
     feature_indices: Optional[Sequence[int]] = None,
+    predict_batch_fn: Optional[Callable[[torch.Tensor], Sequence[int]]] = None,
 ) -> Tuple[torch.Tensor, int]:
     """
     HopSkipJump Attack (Chen et al., 2020) — decision-based black-box attack.
@@ -44,6 +48,18 @@ def hopskipjump_attack(
                            (random init noise, gradient-probe directions and
                            steps are zeroed outside this subset). If None,
                            all features are perturbable.
+        predict_batch_fn:  optional callable (X: 2-D tensor of shape
+                           (k, n_features)) -> sequence of k predicted class
+                           ints. When provided, the gradient-estimation phase
+                           evaluates all n_grad_samples probes in a single
+                           batched forward pass instead of n_grad_samples
+                           sequential batch-1 queries. The set of probes, their
+                           predictions and the resulting gradient estimate are
+                           mathematically identical to the sequential path
+                           (the random directions are drawn in the same order);
+                           only the number of forward passes and model-lock
+                           acquisitions is reduced. Falls back to per-query
+                           evaluation when None.
 
     Returns:
         (x_adv, n_queries): adversarial tensor and total query count.
@@ -70,14 +86,19 @@ def hopskipjump_attack(
 
     # ── Phase 1: find initial adversarial starting point ──────────────────
     x_adv = None
-    for _ in range(n_init_trials):
+    for trial in range(n_init_trials):
         x_candidate = _clip(x_orig + _masked_randn() * init_noise_scale)
         n_queries += 1
         if predict_fn(x_candidate) != y_orig:
             x_adv = x_candidate.clone()
+            logger.debug(f"HSJA init: adversarial start found after {trial + 1} trial(s).")
             break
 
     if x_adv is None:
+        logger.debug(
+            f"HSJA init: no adversarial start found in {n_init_trials} trials; "
+            f"returning clean sample (queries={n_queries})."
+        )
         return x_orig.clone(), n_queries
 
     # ── Phase 2: boundary walk ─────────────────────────────────────────────
@@ -98,22 +119,41 @@ def hopskipjump_attack(
         # Gradient estimation at the boundary via random binary queries
         dist = float(torch.norm(x_adv - x_orig))
         if dist < 1e-9:
+            logger.debug(f"HSJA step {step + 1}/{n_steps}: converged (dist<1e-9), stopping early.")
             break
         # Step size for random perturbation scales with distance and
         # dimensionality so probes stay near the boundary.
         n_dims = float(mask.sum().item()) if mask is not None else float(x_orig.numel())
         delta = dist / (n_dims ** 0.5)
 
-        grad_est = torch.zeros_like(x_orig)
-        for _ in range(n_grad_samples):
-            u = _masked_randn()
-            u = u / (u.norm() + 1e-12)
-            x_probe = _clip(x_adv + delta * u)
-            n_queries += 1
-            # u points "away from clean": if probe is still adversarial,
-            # the boundary is in that direction; else it flipped back.
-            grad_est += u if predict_fn(x_probe) != y_orig else -u
-        grad_est /= n_grad_samples
+        if predict_batch_fn is not None:
+            # Batched path: draw all directions at once. torch.randn fills
+            # row-major, so this yields the exact same values (in the same
+            # order) as n_grad_samples sequential torch.randn_like(x_orig)
+            # draws, keeping the estimate identical to the sequential path.
+            U = torch.randn((n_grad_samples,) + tuple(x_orig.shape))
+            if mask is not None:
+                U = U * mask
+            U = U / (U.flatten(1).norm(dim=1).view(-1, *([1] * (U.ndim - 1))) + 1e-12)
+            X_probe = _clip(x_adv.unsqueeze(0) + delta * U)
+            probe_preds = predict_batch_fn(X_probe)
+            n_queries += n_grad_samples
+            signs = torch.tensor(
+                [1.0 if int(p) != y_orig else -1.0 for p in probe_preds],
+                dtype=U.dtype,
+            )
+            grad_est = (signs.view(-1, *([1] * (U.ndim - 1))) * U).sum(0) / n_grad_samples
+        else:
+            grad_est = torch.zeros_like(x_orig)
+            for _ in range(n_grad_samples):
+                u = _masked_randn()
+                u = u / (u.norm() + 1e-12)
+                x_probe = _clip(x_adv + delta * u)
+                n_queries += 1
+                # u points "away from clean": if probe is still adversarial,
+                # the boundary is in that direction; else it flipped back.
+                grad_est += u if predict_fn(x_probe) != y_orig else -u
+            grad_est /= n_grad_samples
 
         # Geometric-decay step: move x_adv toward x_orig along grad_est.
         # Smaller steps as we get closer (step+1 denominator).
@@ -122,5 +162,11 @@ def hopskipjump_attack(
         n_queries += 1
         if predict_fn(x_new) != y_orig:
             x_adv = x_new
+
+        # Per-step progress (DEBUG): boundary distance should trend downward.
+        logger.debug(
+            f"HSJA step {step + 1}/{n_steps}: boundary_dist={dist:.4f}, "
+            f"cumulative_queries={n_queries}."
+        )
 
     return x_adv, n_queries

@@ -247,41 +247,64 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     all_labels_arr = torch.vstack((diag_labels, anom_labels, atk_labels)).squeeze(1).numpy()  # (N,)
 
     # predict_fn acquires model_lock per query — short critical sections that
-    # do not starve the training thread.
+    # do not starve the training thread. inference_mode is used instead of
+    # no_grad: it skips view/version tracking entirely for a cheaper forward.
     def predict_fn(x: torch.Tensor) -> int:
         brain.model.eval()
-        with brain.model_lock, torch.no_grad():
+        with brain.model_lock, torch.inference_mode():
             logits, _ = brain.model(x.unsqueeze(0))
             return logits.argmax(dim=-1).item()
+
+    # Batched variant: evaluates k probes in a single forward pass / single
+    # lock acquisition. Returns plain Python ints so no inference-mode tensor
+    # escapes the critical section. Used by the gradient-estimation phase,
+    # where the probes are mutually independent.
+    def predict_batch_fn(X: torch.Tensor) -> list:
+        brain.model.eval()
+        with brain.model_lock, torch.inference_mode():
+            logits, _ = brain.model(X)
+            return logits.argmax(dim=-1).tolist()
 
     adv_examples = []
     adv_preds = []
     pert_norms = []
     total_queries = 0
 
-    for i in range(len(all_feats)):
+    n_samples = len(all_feats)
+    round_t0 = time.time()
+    for i in range(n_samples):
         if stop_threads:
             logger.warning(
                 f"HSJA eval round ABORTED — shutdown requested mid-evaluation "
-                f"(processed {i}/{len(all_feats)} samples)."
+                f"(processed {i}/{n_samples} samples)."
             )
             _hsja_eval_running = False
             return
         x = all_feats[i]
         y_i = int(all_labels_arr[i])
+        sample_t0 = time.time()
         x_adv, n_q = hopskipjump_attack(
             predict_fn, x, y_i,
             n_steps=n_steps,
             n_grad_samples=n_grad_samples,
             feature_indices=feature_indices,
+            predict_batch_fn=predict_batch_fn,
         )
         total_queries += n_q
         pert_norms.append(float(torch.norm(x_adv - x)))
         adv_examples.append(x_adv)
-        with brain.model_lock, torch.no_grad():
+        with brain.model_lock, torch.inference_mode():
             brain.model.eval()
             adv_logits, _ = brain.model(x_adv.unsqueeze(0))
             adv_preds.append(adv_logits.argmax(dim=-1).item())
+        # Per-sample progress so a slow/stuck architecture is visible live.
+        sample_dt = time.time() - sample_t0
+        logger.info(
+            f"HSJA progress: sample {i + 1}/{n_samples} done "
+            f"(true_class={y_i}, queries={n_q}, {sample_dt:.2f}s); "
+            f"cumulative_queries={total_queries}, "
+            f"elapsed={time.time() - round_t0:.1f}s."
+        )
 
     adv_preds_arr = np.array(adv_preds)
 
@@ -311,7 +334,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
 
         # Manifold coordinates of adversarial examples for the centre/right panels
         adv_stack = torch.stack(adv_examples)
-        with brain.model_lock, torch.no_grad():
+        with brain.model_lock, torch.inference_mode():
             brain.model.eval()
             _, adv_manifold = brain.model(adv_stack)
         adv_manifold = adv_manifold.numpy()
@@ -327,7 +350,9 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     logger.info(
         f"HSJA eval done — accuracy={adv_accuracy:.3f}, "
         f"avg_perturbation={result['hsja_adv_eval/avg_perturbation']:.4f}, "
-        f"avg_queries={result['hsja_adv_eval/avg_queries']:.0f}"
+        f"avg_queries={result['hsja_adv_eval/avg_queries']:.0f}, "
+        f"total_queries={total_queries}, "
+        f"round_time={time.time() - round_t0:.1f}s ({n_samples} samples)"
     )
 
     metrics_reporter.report(result)

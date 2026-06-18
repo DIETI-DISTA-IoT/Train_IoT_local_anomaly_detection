@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-torch.backends.mkldnn.enabled = False
+torch.backends.mkldnn.enabled = True
 torch.backends.nnpack.enabled = False
 
 class MLP(nn.Module):

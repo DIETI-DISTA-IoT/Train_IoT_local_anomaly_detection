@@ -490,7 +490,7 @@ def send_attack_mitigation_request(vehicle_name):
     response = requests.post(url, json=data)
     try:
         response_json = response.json()
-        logger.info(f"Mitigate-attack Response JSON: {response_json}")
+        # logger.info(f"Mitigate-attack Response JSON: {response_json}")
         mitigation_time = response_json.get('mitigation_time')
         if mitigation_time is not None:
             with lists_lock:

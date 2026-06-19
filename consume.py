@@ -32,6 +32,15 @@ from hopskipjump import hopskipjump_attack, hopskipjump_attack_batch
 # Default HSJA behaviour (feature_indices=None) perturbs the whole vector.
 HSJA_PRESSURE_FEATURE_INDICES = [32, 33]
 
+# The two features that actually carry the anomaly/attack signal. Their position
+# in the feature tensor is resolved from the live message stream (see
+# process_message) rather than hardcoded, because the simulator's column order
+# lives in of-core; relying on a wrong fixed index makes the sigma-grid perturb
+# non-discriminative columns and return identical metrics for every sigma.
+PRESSURE_FEATURE_NAMES = ['usBpPres', 'usMpPres']
+FEATURE_COLUMNS = None       # ordered feature names of the model input tensor
+PRESSURE_INDICES = None      # indices of PRESSURE_FEATURE_NAMES within that tensor
+
 batch_counter = 0
 epoch_counter = 0
 records_processed = 0
@@ -168,6 +177,11 @@ def sigma_grid_evaluation(sigmas, n=300):
     if len(diag_feats) < 10 or len(anom_feats) < 10 or len(atk_feats) < 10:
         return None
 
+    # Perturb the features that actually carry the anomaly/attack signal,
+    # resolved by name from the live stream (falls back to the HSJA constant
+    # only if the stream has not been observed yet).
+    pressure_idx = PRESSURE_INDICES if PRESSURE_INDICES else HSJA_PRESSURE_FEATURE_INDICES
+
     # Only anomaly/attack pressures are perturbed; normal samples stay clean.
     pert_feats = torch.vstack((anom_feats, atk_feats))
     y = torch.vstack((diag_labels, anom_labels, atk_labels)).numpy().ravel()
@@ -176,8 +190,8 @@ def sigma_grid_evaluation(sigmas, n=300):
     for sigma in sigmas:
         sigma = float(sigma)
         noisy = pert_feats.clone()
-        noise = torch.randn(noisy.shape[0], len(HSJA_PRESSURE_FEATURE_INDICES)) * sigma
-        noisy[:, HSJA_PRESSURE_FEATURE_INDICES] += noise
+        noise = torch.randn(noisy.shape[0], len(pressure_idx)) * sigma
+        noisy[:, pressure_idx] += noise
         feats = torch.vstack((diag_feats, noisy))
 
         brain.model.eval()
@@ -452,12 +466,33 @@ def process_message(topic, msg):
     global eval_anomalies_buffer, eval_attacks_buffer
     global anoms_processed, diagnostics_processed, attacks_processed, records_processed
     global eval_anomalies_processed, eval_attacks_processed
+    global FEATURE_COLUMNS, PRESSURE_INDICES
 
     counting_message = False
 
     for col in columns_to_delete:
         if col in msg:
             del msg[col]
+
+    # Resolve the model-input feature order ONCE from a real message, so the
+    # sigma-grid perturbs the true brake-pipe / main-reservoir pressures by
+    # name (Buffer.format drops 'event_type' then tensorises the remaining keys
+    # in dict order, so this list mirrors the tensor exactly).
+    if FEATURE_COLUMNS is None and 'event_type' in msg:
+        FEATURE_COLUMNS = [k for k in msg.keys() if k != 'event_type']
+        PRESSURE_INDICES = [FEATURE_COLUMNS.index(n) for n in PRESSURE_FEATURE_NAMES
+                            if n in FEATURE_COLUMNS]
+        logger.info(
+            f"[sigma-grid] captured {len(FEATURE_COLUMNS)} feature columns; "
+            f"pressure features {PRESSURE_FEATURE_NAMES} -> indices {PRESSURE_INDICES} "
+            f"(hardcoded HSJA constant was {HSJA_PRESSURE_FEATURE_INDICES})"
+        )
+        if not PRESSURE_INDICES:
+            PRESSURE_INDICES = HSJA_PRESSURE_FEATURE_INDICES
+            logger.warning(
+                f"[sigma-grid] pressure feature names not found in stream; "
+                f"falling back to indices {PRESSURE_INDICES}"
+            )
 
     if topic.endswith("_eval_anomalies"):
         if msg['event_type'] == EventType.ANOMALY.value:

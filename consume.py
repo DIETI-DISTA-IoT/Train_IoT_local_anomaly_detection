@@ -733,7 +733,12 @@ def train_model(**kwargs):
     run_benchmarks_freq_epochs = kwargs.get('run_benchmarks_freq_epochs', save_model_freq_epochs)
     plot_creation_freq_benchmarks = kwargs.get('plot_creation_freq_benchmarks', 3)
     hsja_enabled = kwargs.get('hsja_enabled', True)
-    eval_sigmas = kwargs.get('eval_sigmas', [0.5, 1.0, 1.5, 2.0])
+    # Sigma values are in the same wire-scale units as usBpPres/usMpPres (the
+    # producer multiplies bp/mp by 100 before publishing, and Mp_std/Bp_std's
+    # adversarial noise is now added post-rescale too — see
+    # train_simulator.generate_hydraulics). 50/100/150/200 is the *100-scaled
+    # equivalent of the pre-rescale 0.5/1.0/1.5/2.0 grid.
+    eval_sigmas = kwargs.get('eval_sigmas', [50.0, 100.0, 150.0, 200.0])
 
     while not stop_threads:
         batch_feats = None

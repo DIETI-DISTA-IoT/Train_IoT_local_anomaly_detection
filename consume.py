@@ -581,6 +581,15 @@ def consume_vehicle_data():
     subscribe_to_topics()
 
     try:
+        logger.info(
+            f"[STOP] consume_vehicle_data poll loop STARTED for {VEHICLE_NAME} "
+            f"(thread name={threading.current_thread().name}, id={threading.get_ident()}, "
+            f"consumer={consumer!r}). Each poll() blocks up to 5s."
+        )
+    except Exception:
+        logger.exception("[STOP] failed to log consume_vehicle_data thread start")
+
+    try:
         while not stop_threads:
             msg = consumer.poll(5.0)
             if msg is None:
@@ -599,10 +608,33 @@ def consume_vehicle_data():
     except KeyboardInterrupt:
         logger.info(f"consumer interrupted by user.")
     except Exception as e:
-        logger.error(f" error in consumer for {VEHICLE_NAME}: {e}")
+        logger.exception(f"[STOP] error in consumer for {VEHICLE_NAME}: {e}")
     finally:
-        consumer.close()
-        logger.info(f"consumer for {VEHICLE_NAME} closed.")
+        # --- bulletproof logging around the consumer-thread's own close() ---
+        # NOTE: this is the SECOND place consumer.close() can be called; the
+        # other is shutdown_runtime() on the main thread. Logging the thread
+        # identity here makes a double-close / close-during-poll race visible.
+        try:
+            logger.info(
+                f"[STOP] consume_vehicle_data thread "
+                f"(name={threading.current_thread().name}, id={threading.get_ident()}) "
+                f"leaving its poll loop (stop_threads={stop_threads}). "
+                f"About to call consumer.close() FROM THE CONSUMER THREAD. "
+                f"consumer={consumer!r}"
+            )
+        except Exception:
+            logger.exception("[STOP] failed to log before consumer.close() in consumer thread")
+        try:
+            consumer.close()
+            logger.info(
+                f"[STOP] consumer.close() returned normally (from consume_vehicle_data "
+                f"thread) for {VEHICLE_NAME}."
+            )
+        except Exception:
+            logger.exception(
+                f"[STOP] consumer.close() raised in consume_vehicle_data thread for "
+                f"{VEHICLE_NAME}."
+            )
 
 
 def push_weights(**kwargs):
@@ -971,33 +1003,102 @@ def start_consumer_runtime(args_namespace):
 
 def shutdown_runtime(threads_dict):
     global stop_threads, consumer, logger
+
+    # ------------------------------------------------------------------ #
+    # Bulletproof logging of the STOP procedure.                         #
+    # Functionality is unchanged: stop_threads is still set, every thread #
+    # is still join()ed with a 1s timeout in the same order, the consumer #
+    # is still closed, producers are still flushed and owned topics are   #
+    # still deleted. Only logging was added so we can observe a           #
+    # close()-during-poll() / double-close race during teardown.          #
+    # ------------------------------------------------------------------ #
+    try:
+        logger.info(
+            f"[STOP] shutdown_runtime() ENTERED on thread "
+            f"(name={threading.current_thread().name}, id={threading.get_ident()})."
+        )
+    except Exception:
+        logger.exception("[STOP] failed to log shutdown_runtime entry")
+
     stop_threads = True
-    logger.info("Stopping consumer runtime...")
+    logger.info("[STOP] stop_threads set to True. Requesting all worker threads to stop...")
+
     try:
-        logger.info("Waiting for threads to stop...")
-        threads_dict['resubscription_thread'].join(1)
-        threads_dict['stats_consuming_thread'].join(1)
-        threads_dict['training_thread'].join(1)
-        threads_dict['pushing_weights_thread'].join(1)
-        threads_dict['pulling_weights_thread'].join(1)
-        logger.info("Threads stopped.")
-    except Exception as e:
-        logger.error(f"Error stopping threads: {e}")
-        pass
+        logger.info("[STOP] Waiting for threads to stop (join timeout = 1s each)...")
+        for tname in (
+            'resubscription_thread',
+            'stats_consuming_thread',
+            'training_thread',
+            'pushing_weights_thread',
+            'pulling_weights_thread',
+        ):
+            t = threads_dict.get(tname)
+            try:
+                alive_before = t.is_alive() if t is not None else None
+                tid = t.ident if t is not None else None
+                logger.info(
+                    f"[STOP] joining {tname} (id={tid}, alive_before={alive_before}) "
+                    f"with timeout=1s..."
+                )
+                if t is not None:
+                    t.join(1)
+                alive_after = t.is_alive() if t is not None else None
+                if alive_after:
+                    logger.warning(
+                        f"[STOP] {tname} (id={tid}) is STILL ALIVE after join(1) timed out. "
+                        f"If this is the stats_consuming_thread it is very likely still "
+                        f"inside consumer.poll(5.0) and the upcoming consumer.close() will "
+                        f"race against it (librdkafka is NOT thread-safe)."
+                    )
+                else:
+                    logger.info(f"[STOP] {tname} (id={tid}) stopped cleanly.")
+            except Exception:
+                logger.exception(f"[STOP] error while joining {tname}")
+        logger.info("[STOP] thread-join phase finished.")
+    except Exception:
+        logger.exception("[STOP] unexpected error during thread-join phase")
+
+    # --- close the Kafka consumer (main-thread close) ---
     try:
-        logger.info("Closing Kafka consumer...")
+        stats_thread = threads_dict.get('stats_consuming_thread')
+        stats_alive = stats_thread.is_alive() if stats_thread is not None else None
+    except Exception:
+        stats_alive = "unknown"
+        logger.exception("[STOP] could not read stats_consuming_thread alive-state")
+
+    try:
+        logger.info(
+            f"[STOP] About to call consumer.close() FROM THE MAIN/STOP THREAD "
+            f"(id={threading.get_ident()}). consumer={consumer!r}. "
+            f"stats_consuming_thread alive={stats_alive}. "
+            f"If alive=True this close() races an in-flight poll() and may crash the "
+            f"process natively (no Python traceback will follow)."
+        )
         consumer.close()
-    except Exception as e:
-        logger.error(f"Error closing Kafka consumer: {e}")
-        pass
+        logger.info("[STOP] consumer.close() returned normally (from main/stop thread).")
+    except Exception:
+        logger.exception("[STOP] error closing Kafka consumer from main/stop thread")
+
     try:
+        logger.info("[STOP] flushing Kafka producers (5s timeout each)...")
         metrics_reporter.producer.flush(5)
         weights_reporter.producer.flush(5)
-        logger.info("Kafka producers flushed.")
-    except Exception as e:
-        logger.error(f"Error flushing Kafka producers: {e}")
-    delete_owned_topics()
-    logger.info("Exiting main thread.")
+        logger.info("[STOP] Kafka producers flushed.")
+    except Exception:
+        logger.exception("[STOP] error flushing Kafka producers")
+
+    # delete_owned_topics() was previously unguarded, so an exception here
+    # propagated out of shutdown_runtime(). Preserve that by re-raising after
+    # logging — we only want to record the traceback, not swallow it.
+    logger.info("[STOP] deleting owned topics...")
+    try:
+        delete_owned_topics()
+    except Exception:
+        logger.exception("[STOP] error during delete_owned_topics() (re-raising)")
+        raise
+    logger.info("[STOP] delete_owned_topics() returned.")
+
+    logger.info("[STOP] shutdown_runtime() COMPLETE.")
 
 
 class ConsumerAPI(ContainerAPI):
@@ -1022,13 +1123,23 @@ class ConsumerAPI(ContainerAPI):
         return {'status': 'started', 'vehicle': os.getenv('VEHICLE_NAME')}
 
     def handle_stop(self, data):
-        self.logger.info("Stopping consumer...")
+        self.logger.info(
+            f"[STOP] handle_stop() invoked on thread "
+            f"(name={threading.current_thread().name}, id={threading.get_ident()}) "
+            f"with data={data!r}."
+        )
         if self._threads is None:
-            self.logger.info("Consumer is already stopped.")
+            self.logger.info("[STOP] Consumer is already stopped; nothing to do.")
             return {'status': 'already_stopped'}
-        shutdown_runtime(self._threads)
+        try:
+            shutdown_runtime(self._threads)
+        except Exception:
+            # Re-raise to preserve existing behaviour; just make sure the
+            # full traceback is captured before it propagates.
+            self.logger.exception("[STOP] shutdown_runtime() raised an exception.")
+            raise
         self._threads = None
-        self.logger.info("Consumer stopped.")
+        self.logger.info("[STOP] Consumer stopped (handle_stop complete).")
         return {'status': 'stopped'}
 
 

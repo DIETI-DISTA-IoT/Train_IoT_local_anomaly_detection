@@ -210,7 +210,7 @@ def sigma_grid_evaluation(sigmas, n=300):
 
 
 def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots=True,
-                    feature_indices=None, clean_anchors=True):
+                    feature_indices=None, clean_anchors=True, init_noise_scale=3.0):
     """
     Run HopSkipJump attack on a small sample from each class buffer.
 
@@ -227,7 +227,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     logger.info(
         f"HSJA eval round STARTING — n_per_class={n_per_class}, n_steps={n_steps}, "
         f"n_grad_samples={n_grad_samples}, include_plots={include_plots}, "
-        f"clean_anchors={clean_anchors}, "
+        f"clean_anchors={clean_anchors}, init_noise_scale={init_noise_scale}, "
         f"feature_indices={'all' if feature_indices is None else feature_indices}."
     )
 
@@ -289,6 +289,7 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
         y_orig,
         n_steps=n_steps,
         n_grad_samples=n_grad_samples,
+        init_noise_scale=init_noise_scale,
         feature_indices=feature_indices,
         should_stop=lambda: stop_threads,
     )
@@ -704,6 +705,7 @@ def _run_hsja_evaluation_bg(**kwargs):
             include_plots=kwargs.get('include_plots', True),
             feature_indices=kwargs.get('hsja_feature_indices', None),
             clean_anchors=kwargs.get('hsja_clean_anchors', True),
+            init_noise_scale=kwargs.get('hsja_init_noise_scale', 3.0),
         )
     except Exception as e:
         logger.error(f"HSJA evaluation raised an exception: {e}", exc_info=True)

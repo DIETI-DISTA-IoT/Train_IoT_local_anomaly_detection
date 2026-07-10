@@ -4,6 +4,8 @@ import json
 import logging
 import pickle
 
+from OpenFAIR.packet_loss import PacketLossSimulator
+
 class WeightsReporter:
     def __init__(self, **kwargs):
         kafka_broker_url = kwargs.get('kafka_broker')
@@ -14,13 +16,18 @@ class WeightsReporter:
         'value.serializer': lambda v, ctx: pickle.dumps(v)
          }
         self.producer = SerializingProducer(conf_prod_weights)
+        self.packet_loss = PacketLossSimulator(kwargs.get('packet_loss_rate', 0.1))
 
         self.logger = logging.getLogger("weights_upload_" + kwargs['vehicle_name'])
         self.logger.setLevel(str(kwargs.get('logging_level', 'INFO')).upper())
-    
+
 
     def push_weights(self, weights):
         weights_topic=f"{self.vehicle_name}_weights"
+        if self.packet_loss.should_drop():
+            self.logger.debug(f"[packet-loss] dropped weights update for topic {weights_topic} "
+                              f"(rate={self.packet_loss.packet_loss_rate})")
+            return
         try:
             self.producer.produce(topic=weights_topic, value=weights)
             self.producer.flush()
@@ -38,8 +45,9 @@ class MetricsReporter:
         'key.serializer': StringSerializer('utf_8'),
         'value.serializer': lambda v, ctx: json.dumps(v)
          }
-        
-        self.producer = SerializingProducer(conf_prod_stat)    
+
+        self.producer = SerializingProducer(conf_prod_stat)
+        self.packet_loss = PacketLossSimulator(kwargs.get('packet_loss_rate', 0.1))
         self.logger = logging.getLogger("metrics_reporter_" + kwargs['vehicle_name'])
         self.logger.setLevel(str(kwargs.get('logging_level', 'INFO')).upper())
 
@@ -51,6 +59,10 @@ class MetricsReporter:
         stats.update(metrics)
 
         topic_statistics=f"{self.vehicle_name}_statistics"
+        if self.packet_loss.should_drop():
+            self.logger.debug(f"[packet-loss] dropped statistics message for topic {topic_statistics} "
+                              f"(rate={self.packet_loss.packet_loss_rate})")
+            return
         try:
             self.producer.produce(topic=topic_statistics, value=stats)
             self.producer.flush()

@@ -37,6 +37,10 @@ class WeightsReporter:
 
 
 class MetricsReporter:
+    # Publishes to {vehicle}_statistics, which Wandber subscribes to directly
+    # ('^.*_statistics$') for W&B logging (inference/robustness metrics,
+    # mitigation reward, plots, ...). Never subject to simulated packet loss —
+    # only the producer -> consumer telemetry / consumer -> FL weights are.
     def __init__(self, **kwargs):
         kafka_broker_url = kwargs.get('kafka_broker')
         self.vehicle_name = kwargs.get('vehicle_name')
@@ -47,7 +51,6 @@ class MetricsReporter:
          }
 
         self.producer = SerializingProducer(conf_prod_stat)
-        self.packet_loss = PacketLossSimulator(kwargs.get('packet_loss_rate', 0.1))
         self.logger = logging.getLogger("metrics_reporter_" + kwargs['vehicle_name'])
         self.logger.setLevel(str(kwargs.get('logging_level', 'INFO')).upper())
 
@@ -59,10 +62,6 @@ class MetricsReporter:
         stats.update(metrics)
 
         topic_statistics=f"{self.vehicle_name}_statistics"
-        if self.packet_loss.should_drop():
-            self.logger.debug(f"[packet-loss] dropped statistics message for topic {topic_statistics} "
-                              f"(rate={self.packet_loss.packet_loss_rate})")
-            return
         try:
             self.producer.produce(topic=topic_statistics, value=stats)
             self.producer.flush()

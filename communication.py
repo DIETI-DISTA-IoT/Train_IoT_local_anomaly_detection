@@ -5,6 +5,7 @@ import logging
 import pickle
 
 from OpenFAIR.packet_loss import PacketLossSimulator
+from OpenFAIR.network_delay import NetworkDelaySimulator
 
 class WeightsReporter:
     def __init__(self, **kwargs):
@@ -17,6 +18,11 @@ class WeightsReporter:
          }
         self.producer = SerializingProducer(conf_prod_weights)
         self.packet_loss = PacketLossSimulator(kwargs.get('packet_loss_rate', 0.1))
+        # Simulated latency+jitter on the {vehicle}_weights upload to the FL
+        # manager (same policy as packet_loss — {vehicle}_statistics is
+        # W&B-bound and never delayed, see MetricsReporter).
+        self.network_delay = NetworkDelaySimulator(
+            kwargs.get('delay_mean_ms', 0.0), kwargs.get('jitter_std_ms', 0.0))
 
         self.logger = logging.getLogger("weights_upload_" + kwargs['vehicle_name'])
         self.logger.setLevel(str(kwargs.get('logging_level', 'INFO')).upper())
@@ -28,12 +34,16 @@ class WeightsReporter:
             self.logger.debug(f"[packet-loss] dropped weights update for topic {weights_topic} "
                               f"(rate={self.packet_loss.packet_loss_rate})")
             return
-        try:
-            self.producer.produce(topic=weights_topic, value=weights)
-            self.producer.flush()
-            self.logger.info(f"Published to topic: {weights_topic}")
-        except Exception as e:
-            self.logger.error(f"Failed to produce weights: {e}")
+
+        def _deliver():
+            try:
+                self.producer.produce(topic=weights_topic, value=weights)
+                self.producer.flush()
+                self.logger.info(f"Published to topic: {weights_topic}")
+            except Exception as e:
+                self.logger.error(f"Failed to produce weights: {e}")
+
+        self.network_delay.send(_deliver)
 
 
 class MetricsReporter:

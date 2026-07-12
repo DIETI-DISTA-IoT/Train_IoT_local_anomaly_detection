@@ -98,6 +98,30 @@ def thread_safe_lock(lock):
     return decorator
 
 
+def _sample_with_anchor_fallback(primary_buffer, anchor_buffer, n):
+    """Sample up to n items from primary_buffer, topping up from anchor_buffer
+    when primary_buffer is short.
+
+    A no-op whenever primary_buffer already holds >= n items (every existing
+    experiment: ET1/ET2/ET3, network-ET4), since the top-up only fires on the
+    shortfall. Exists so the robustness evals below keep reporting for a
+    class-imbalance experiment where a class's live buffer is deliberately
+    starved (e.g. config/overrides/exp_et4_angela_abnormalscarce_mild.yaml) —
+    anchor_buffer is filled at a fixed rate independent of that throttling
+    (see thread_eval_anchors in produce.py).
+    """
+    feats, labels = primary_buffer.sample(n)
+    have = len(feats)
+    if have >= n:
+        return feats, labels
+    extra_feats, extra_labels = anchor_buffer.sample(n - have)
+    if len(extra_feats) == 0:
+        return feats, labels
+    if have == 0:
+        return extra_feats, extra_labels
+    return torch.vstack((feats, extra_feats)), torch.vstack((labels, extra_labels))
+
+
 def visual_evaluation(n=1000, include_plots=True):
     global brain
     diagnostics_feats, diag_main_labels = diagnostics_buffer.sample(n // 3)
@@ -170,9 +194,9 @@ def sigma_grid_evaluation(sigmas, n=300):
     """
     global brain
     per_class = max(n // 3, 1)
-    diag_feats, diag_labels = diagnostics_buffer.sample(per_class)
-    anom_feats, anom_labels = anomalies_buffer.sample(per_class)
-    atk_feats, atk_labels = attacks_buffer.sample(per_class)
+    diag_feats, diag_labels = _sample_with_anchor_fallback(diagnostics_buffer, anchor_diagnostics_buffer, per_class)
+    anom_feats, anom_labels = _sample_with_anchor_fallback(anomalies_buffer, anchor_anomalies_buffer, per_class)
+    atk_feats, atk_labels = _sample_with_anchor_fallback(attacks_buffer, anchor_attacks_buffer, per_class)
 
     if len(diag_feats) < 10 or len(anom_feats) < 10 or len(atk_feats) < 10:
         return None
@@ -237,12 +261,20 @@ def hsja_evaluation(n_per_class=10, n_steps=30, n_grad_samples=30, include_plots
     # avg_perturbation / avg_queries directly comparable across the fleet
     # (the default, decoupled behaviour). Set clean_anchors=False to recover
     # the legacy behaviour of attacking the noisy producer eval stream.
-    anom_buf = anomalies_buffer if clean_anchors else eval_anomalies_buffer
-    atk_buf = attacks_buffer if clean_anchors else eval_attacks_buffer
-
-    diag_feats, diag_labels = diagnostics_buffer.sample(n_per_class)
-    anom_feats, anom_labels = anom_buf.sample(n_per_class)
-    atk_feats, atk_labels = atk_buf.sample(n_per_class)
+    #
+    # The anchor-buffer fallback (see _sample_with_anchor_fallback) only
+    # applies on the clean_anchors=True path: the anchor stream is itself
+    # clean (no Mp_std/Bp_std noise, see thread_eval_anchors in produce.py),
+    # so it is not a valid substitute for the legacy noisy eval_* buffers
+    # used when clean_anchors=False.
+    if clean_anchors:
+        diag_feats, diag_labels = _sample_with_anchor_fallback(diagnostics_buffer, anchor_diagnostics_buffer, n_per_class)
+        anom_feats, anom_labels = _sample_with_anchor_fallback(anomalies_buffer, anchor_anomalies_buffer, n_per_class)
+        atk_feats, atk_labels = _sample_with_anchor_fallback(attacks_buffer, anchor_attacks_buffer, n_per_class)
+    else:
+        diag_feats, diag_labels = diagnostics_buffer.sample(n_per_class)
+        anom_feats, anom_labels = eval_anomalies_buffer.sample(n_per_class)
+        atk_feats, atk_labels = eval_attacks_buffer.sample(n_per_class)
 
     if len(diag_feats) < 5 or len(anom_feats) < 5 or len(atk_feats) < 5:
         # Silent omission guard: the round was triggered but cannot run because
@@ -465,6 +497,7 @@ def deserialize_message(msg):
 def process_message(topic, msg):
     global anomalies_buffer, diagnostics_buffer, attacks_buffer
     global eval_anomalies_buffer, eval_attacks_buffer
+    global anchor_diagnostics_buffer, anchor_anomalies_buffer, anchor_attacks_buffer
     global anoms_processed, diagnostics_processed, attacks_processed, records_processed
     global eval_anomalies_processed, eval_attacks_processed
     global FEATURE_COLUMNS, PRESSURE_INDICES
@@ -495,7 +528,25 @@ def process_message(topic, msg):
                 f"falling back to indices {PRESSURE_INDICES}"
             )
 
-    if topic.endswith("_eval_anomalies"):
+    if topic.endswith("_eval_anchors"):
+        # Decoupled, class-balanced eval-anchor stream (see
+        # thread_eval_anchors in produce.py) — never subject to
+        # mu_normal/mu_anomalies throttling, so these buffers stay a
+        # reliable fallback anchor source for sigma-grid/HSJA/visual evals
+        # even when the live buffers below are deliberately starved for a
+        # class-imbalance experiment. Not counted into records_processed /
+        # online classification (it isn't live telemetry).
+        if msg['event_type'] == EventType.NORMAL.value:
+            feat_tensor, main_label_tensor = anchor_diagnostics_buffer.format(msg)
+            anchor_diagnostics_buffer.add(feat_tensor, main_label_tensor)
+        elif msg['event_type'] == EventType.ANOMALY.value:
+            feat_tensor, main_label_tensor = anchor_anomalies_buffer.format(msg)
+            anchor_anomalies_buffer.add(feat_tensor, main_label_tensor)
+        elif msg['event_type'] == EventType.ATTACK.value:
+            feat_tensor, main_label_tensor = anchor_attacks_buffer.format(msg)
+            anchor_attacks_buffer.add(feat_tensor, main_label_tensor)
+
+    elif topic.endswith("_eval_anomalies"):
         if msg['event_type'] == EventType.ANOMALY.value:
             feat_tensor, main_label_tensor = eval_anomalies_buffer.format(msg)
             eval_anomalies_buffer.add(feat_tensor, main_label_tensor)
@@ -599,7 +650,8 @@ def online_classification(feat_tensor, main_label_tensor):
 
 def subscribe_to_topics():
     global consumer
-    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_eval_anomalies", f"{VEHICLE_NAME}_normal_data"]
+    topics = [f"{VEHICLE_NAME}_anomalies", f"{VEHICLE_NAME}_eval_anomalies",
+              f"{VEHICLE_NAME}_eval_anchors", f"{VEHICLE_NAME}_normal_data"]
     consumer.subscribe(topics)
     global_weights_puller.subscribe()
     logger.debug(f"(re)subscribed to topics: {topics}")
@@ -918,6 +970,7 @@ def start_consumer_runtime(args_namespace):
     global batch_size, stop_threads, stats_consuming_thread, training_thread, pushing_weights_thread, pulling_weights_thread
     global attacks_buffer, anomalies_buffer, diagnostics_buffer, brain, metrics_reporter, logger, weights_reporter, global_weights_puller
     global eval_attacks_buffer, eval_anomalies_buffer, adversarial_training
+    global anchor_diagnostics_buffer, anchor_anomalies_buffer, anchor_attacks_buffer
     global resubscribe_interval_seconds, epoch_batches
     global true_positive_reward, false_positive_reward, true_negative_reward, false_negative_reward
     global batch_counter, epoch_counter, records_processed, attacks_processed, anoms_processed
@@ -997,6 +1050,13 @@ def start_consumer_runtime(args_namespace):
     anomalies_buffer = Buffer(args.buffer_size)
     eval_anomalies_buffer = Buffer(args.buffer_size)
     diagnostics_buffer = Buffer(args.buffer_size)
+    # Decoupled, always-balanced eval-anchor buffers (see process_message's
+    # "_eval_anchors" branch and produce.py's thread_eval_anchors) — a
+    # fallback sample source for the robustness evals below when a class's
+    # live buffer is deliberately starved by a class-imbalance experiment.
+    anchor_diagnostics_buffer = Buffer(args.buffer_size)
+    anchor_anomalies_buffer = Buffer(args.buffer_size)
+    anchor_attacks_buffer = Buffer(args.buffer_size)
 
     resubscribe_interval_seconds = args.kafka_topic_update_interval_secs
     resubscription_thread = threading.Thread(target=resubscribe)
